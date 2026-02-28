@@ -600,6 +600,13 @@ class GeminiAnalyzer:
         """
         config = get_config()
 
+        key_len = len(config.openai_api_key) if config.openai_api_key else 0
+        is_placeholder = bool(config.openai_api_key and config.openai_api_key.startswith('your_'))
+        logger.info(
+            f"OpenAI 兼容 API Key 检查: present={bool(config.openai_api_key)}, len={key_len}, "
+            f"placeholder={is_placeholder}, base_url={config.openai_base_url or 'default'}"
+        )
+
         # 检查 OpenAI API Key 是否有效（过滤占位符）
         openai_key_valid = (
             config.openai_api_key and
@@ -608,7 +615,7 @@ class GeminiAnalyzer:
         )
 
         if not openai_key_valid:
-            logger.debug("OpenAI 兼容 API 未配置或配置无效")
+            logger.warning("OpenAI 兼容 API 未配置或配置无效（可能是空值、占位符或长度不足）")
             return
 
         # 分离 import 和客户端创建，以便提供更准确的错误信息

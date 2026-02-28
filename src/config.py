@@ -651,10 +651,16 @@ class Config:
         if not self.tushare_token:
             warnings.append("提示：未配置 Tushare Token，将使用其他数据源")
         
-        if not self.gemini_api_key and not self.anthropic_api_key and not self.openai_api_key:
+        gemini_valid = bool(self.gemini_api_key and not self.gemini_api_key.startswith('your_') and len(self.gemini_api_key) > 10)
+        anthropic_valid = bool(self.anthropic_api_key and not self.anthropic_api_key.startswith('your_') and len(self.anthropic_api_key) > 10)
+        openai_valid = bool(self.openai_api_key and not self.openai_api_key.startswith('your_') and len(self.openai_api_key) >= 8)
+
+        if not gemini_valid and not anthropic_valid and not openai_valid:
             warnings.append("警告：未配置 Gemini/Anthropic/OpenAI API Key，AI 分析功能将不可用")
-        elif not self.gemini_api_key and not self.anthropic_api_key:
+        elif not gemini_valid and not anthropic_valid and openai_valid:
             warnings.append("提示：未配置 Gemini/Anthropic API Key，将使用 OpenAI 兼容 API")
+        elif not gemini_valid and not anthropic_valid and self.openai_api_key and not openai_valid:
+            warnings.append("警告：OpenAI API Key 配置无效（占位符或长度不足），AI 分析功能将不可用")
         
         if not self.bocha_api_keys and not self.tavily_api_keys and not self.brave_api_keys and not self.serpapi_keys:
             warnings.append("提示：未配置搜索引擎 API Key (Bocha/Tavily/Brave/SerpAPI)，新闻搜索功能将不可用")
