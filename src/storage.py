@@ -390,6 +390,18 @@ class OvernightRawRecord(Base):
     created_at = Column(DateTime, default=datetime.now, index=True)
 
 
+class OvernightDocumentFamily(Base):
+    """文档家族：将同一规范文档的多个版本归组。"""
+
+    __tablename__ = "overnight_document_families"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    family_key = Column(String(1000), nullable=False, unique=True, index=True)
+    family_type = Column(String(64), nullable=False)
+    created_at = Column(DateTime, default=datetime.now, index=True)
+    updated_at = Column(DateTime, default=datetime.now, onupdate=datetime.now)
+
+
 class OvernightSourceItem(Base):
     """归一化来源条目（关联原始记录）。"""
 
@@ -404,8 +416,46 @@ class OvernightSourceItem(Base):
     )
     canonical_url = Column(String(1000), nullable=False, index=True)
     title = Column(String(500), nullable=False)
+    summary = Column(Text, nullable=False, default="")
     document_type = Column(String(50), nullable=False)
+    title_hash = Column(String(64), nullable=True, index=True)
+    body_hash = Column(String(64), nullable=True, index=True)
+    content_hash = Column(String(64), nullable=True, index=True)
+    normalized_entities = Column(Text, nullable=False, default="[]")
+    normalized_numeric_facts = Column(Text, nullable=False, default="[]")
+    family_id = Column(
+        Integer,
+        ForeignKey("overnight_document_families.id"),
+        nullable=True,
+        index=True,
+    )
     created_at = Column(DateTime, default=datetime.now, index=True)
+
+
+class OvernightDocumentVersion(Base):
+    """文档版本记录。"""
+
+    __tablename__ = "overnight_document_versions"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    item_id = Column(
+        Integer,
+        ForeignKey("overnight_source_items.id"),
+        nullable=False,
+        index=True,
+    )
+    title_hash = Column(String(64), nullable=False, index=True)
+    body_hash = Column(String(64), nullable=False, index=True)
+    created_at = Column(DateTime, default=datetime.now, index=True)
+
+    __table_args__ = (
+        UniqueConstraint(
+            "item_id",
+            "title_hash",
+            "body_hash",
+            name="uix_overnight_item_title_body_version",
+        ),
+    )
 
 
 class OvernightEventCluster(Base):
