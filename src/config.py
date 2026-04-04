@@ -190,6 +190,8 @@ class Config:
     overnight_brief_enabled: bool = False
     overnight_digest_cutoff: str = "07:30"
     overnight_priority_alert_threshold: str = "P0"
+    overnight_priority_p0_score_cutoff: int = 85
+    overnight_priority_p1_score_cutoff: int = 60
     overnight_source_whitelist: str = ""
     
     # === 日志配置 ===
@@ -479,6 +481,12 @@ class Config:
             overnight_brief_enabled=os.getenv('OVERNIGHT_BRIEF_ENABLED', 'false').lower() == 'true',
             overnight_digest_cutoff=os.getenv('OVERNIGHT_DIGEST_CUTOFF', '07:30'),
             overnight_priority_alert_threshold=os.getenv('OVERNIGHT_PRIORITY_ALERT_THRESHOLD', 'P0'),
+            overnight_priority_p0_score_cutoff=int(
+                os.getenv('OVERNIGHT_PRIORITY_P0_SCORE_CUTOFF', '85')
+            ),
+            overnight_priority_p1_score_cutoff=int(
+                os.getenv('OVERNIGHT_PRIORITY_P1_SCORE_CUTOFF', '60')
+            ),
             overnight_source_whitelist=os.getenv('OVERNIGHT_SOURCE_WHITELIST', ''),
             log_dir=os.getenv('LOG_DIR', './logs'),
             log_level=os.getenv('LOG_LEVEL', 'INFO'),

@@ -10,6 +10,7 @@ from typing import Optional
 
 from sqlalchemy import select
 
+from src.overnight.market_context import MarketLinkSet, MarketSnapshot
 from src.overnight.ledger import StoredSourceItem
 from src.overnight.normalizer import EntityMention, NormalizedSourceItem, NumericFact
 from src.storage import (
@@ -17,6 +18,7 @@ from src.storage import (
     OvernightDocumentFamily,
     OvernightDocumentVersion,
     OvernightEventCluster,
+    OvernightMarketSnapshot,
     OvernightRawRecord,
     OvernightSourceItem,
 )
@@ -196,6 +198,49 @@ class OvernightRepository:
             session.refresh(cluster)
             return int(cluster.id)
 
+    def save_market_snapshot(
+        self,
+        snapshot: MarketSnapshot,
+        *,
+        cluster_id: int | None = None,
+    ) -> int:
+        with self.db.get_session() as session:
+            row = OvernightMarketSnapshot(
+                cluster_id=cluster_id,
+                event_key=snapshot.event_key,
+                event_type=snapshot.event_type,
+                event_subtype=snapshot.event_subtype,
+                link_set_json=json.dumps(snapshot.link_set.to_dict(), ensure_ascii=True, sort_keys=True),
+                transmission_map_json=json.dumps(
+                    {key: list(values) for key, values in snapshot.transmission_map.items()},
+                    ensure_ascii=True,
+                    sort_keys=True,
+                ),
+                rationale_json=json.dumps(list(snapshot.rationale), ensure_ascii=True),
+            )
+            session.add(row)
+            session.commit()
+            session.refresh(row)
+            return int(row.id)
+
+    def list_market_snapshots(
+        self,
+        *,
+        event_key: str | None = None,
+        cluster_id: int | None = None,
+    ) -> list[MarketSnapshot]:
+        with self.db.get_session() as session:
+            query = select(OvernightMarketSnapshot)
+            if event_key is not None:
+                query = query.where(OvernightMarketSnapshot.event_key == event_key)
+            if cluster_id is not None:
+                query = query.where(OvernightMarketSnapshot.cluster_id == cluster_id)
+
+            rows = session.execute(
+                query.order_by(OvernightMarketSnapshot.created_at.asc(), OvernightMarketSnapshot.id.asc())
+            ).scalars().all()
+            return [self._to_market_snapshot(row) for row in rows]
+
     def _to_stored_item(
         self,
         row: OvernightSourceItem,
@@ -222,5 +267,25 @@ class OvernightRepository:
             family_key=family.family_key if family is not None else None,
             family_type=family.family_type if family is not None else None,
             version_id=version_id,
+            created_at=row.created_at,
+        )
+
+    def _to_market_snapshot(self, row: OvernightMarketSnapshot) -> MarketSnapshot:
+        link_set_payload = json.loads(row.link_set_json or "{}")
+        transmission_payload = json.loads(row.transmission_map_json or "{}")
+        rationale_payload = json.loads(row.rationale_json or "[]")
+
+        return MarketSnapshot(
+            id=int(row.id),
+            cluster_id=row.cluster_id,
+            event_key=row.event_key,
+            event_type=row.event_type,
+            event_subtype=row.event_subtype,
+            link_set=MarketLinkSet.from_dict(link_set_payload),
+            transmission_map={
+                key: tuple(values)
+                for key, values in transmission_payload.items()
+            },
+            rationale=tuple(rationale_payload),
             created_at=row.created_at,
         )

@@ -481,6 +481,27 @@ class OvernightEventCluster(Base):
     updated_at = Column(DateTime, default=datetime.now, onupdate=datetime.now)
 
 
+class OvernightMarketSnapshot(Base):
+    """Persisted market context snapshots for overnight event clusters."""
+
+    __tablename__ = "overnight_market_snapshots"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    cluster_id = Column(
+        Integer,
+        ForeignKey("overnight_event_clusters.id"),
+        nullable=True,
+        index=True,
+    )
+    event_key = Column(String(1000), nullable=False, index=True)
+    event_type = Column(String(64), nullable=False, index=True)
+    event_subtype = Column(String(64), nullable=False, index=True)
+    link_set_json = Column(Text, nullable=False, default="{}")
+    transmission_map_json = Column(Text, nullable=False, default="{}")
+    rationale_json = Column(Text, nullable=False, default="[]")
+    created_at = Column(DateTime, default=datetime.now, index=True)
+
+
 class DatabaseManager:
     """
     数据库管理器 - 单例模式
@@ -599,7 +620,11 @@ class DatabaseManager:
                         f"ALTER TABLE overnight_source_items ADD COLUMN {column_name} {column_sql}"
                     )
 
-            for table_name in ("overnight_document_families", "overnight_document_versions"):
+            for table_name in (
+                "overnight_document_families",
+                "overnight_document_versions",
+                "overnight_market_snapshots",
+            ):
                 if table_name in table_names:
                     continue
                 Base.metadata.tables[table_name].create(bind=connection, checkfirst=True)
