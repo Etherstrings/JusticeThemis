@@ -386,7 +386,7 @@ class OvernightRawRecord(Base):
     id = Column(Integer, primary_key=True, autoincrement=True)
     source_id = Column(String(100), nullable=False, index=True)
     fetch_mode = Column(String(32), nullable=False)
-    payload_hash = Column(String(128), nullable=False, unique=True, index=True)
+    payload_hash = Column(String(128), nullable=False, index=True)
     created_at = Column(DateTime, default=datetime.now, index=True)
 
 
@@ -402,7 +402,7 @@ class OvernightSourceItem(Base):
         nullable=False,
         index=True,
     )
-    canonical_url = Column(String(1000), nullable=False, unique=True, index=True)
+    canonical_url = Column(String(1000), nullable=False, index=True)
     title = Column(String(500), nullable=False)
     document_type = Column(String(50), nullable=False)
     created_at = Column(DateTime, default=datetime.now, index=True)

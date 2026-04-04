@@ -11,6 +11,7 @@ from copy import deepcopy
 from typing import Any, Dict, List, Optional
 
 SCHEMA_VERSION = "2026-02-09"
+_HHMM_PATTERN = r"^([01]\d|2[0-3]):[0-5]\d$"
 
 _CATEGORY_DEFINITIONS: List[Dict[str, Any]] = [
     {
@@ -481,7 +482,7 @@ _FIELD_DEFINITIONS: Dict[str, Dict[str, Any]] = {
         "is_editable": True,
         "default_value": "18:00",
         "options": [],
-        "validation": {"pattern": r"^([01]\d|2[0-3]):[0-5]\d$"},
+        "validation": {"pattern": _HHMM_PATTERN},
         "display_order": 10,
     },
     "HTTP_PROXY": {
@@ -558,14 +559,14 @@ _FIELD_DEFINITIONS: Dict[str, Dict[str, Any]] = {
         "title": "Overnight Digest Cutoff",
         "description": "Digest cutoff time in HH:MM.",
         "category": "system",
-        "data_type": "string",
-        "ui_control": "text",
+        "data_type": "time",
+        "ui_control": "time",
         "is_sensitive": False,
         "is_required": False,
         "is_editable": True,
         "default_value": "07:30",
         "options": [],
-        "validation": {},
+        "validation": {"pattern": _HHMM_PATTERN},
         "display_order": 47,
     },
     "OVERNIGHT_PRIORITY_ALERT_THRESHOLD": {
