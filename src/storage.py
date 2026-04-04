@@ -53,6 +53,16 @@ logger = logging.getLogger(__name__)
 # SQLAlchemy ORM 基类
 Base = declarative_base()
 
+_OVERNIGHT_SOURCE_ITEM_BOOTSTRAP_COLUMNS: tuple[tuple[str, str], ...] = (
+    ("summary", "TEXT NOT NULL DEFAULT ''"),
+    ("title_hash", "VARCHAR(64)"),
+    ("body_hash", "VARCHAR(64)"),
+    ("content_hash", "VARCHAR(64)"),
+    ("normalized_entities", "TEXT NOT NULL DEFAULT '[]'"),
+    ("normalized_numeric_facts", "TEXT NOT NULL DEFAULT '[]'"),
+    ("family_id", "INTEGER"),
+)
+
 if TYPE_CHECKING:
     from src.search_service import SearchResponse
 
@@ -521,6 +531,7 @@ class DatabaseManager:
         
         # 创建所有表
         Base.metadata.create_all(self._engine)
+        self._bootstrap_overnight_schema()
 
         self._initialized = True
         logger.info(f"数据库初始化完成: {db_url}")
@@ -560,6 +571,38 @@ class DatabaseManager:
                 logger.debug("数据库引擎已清理")
         except Exception as e:
             logger.warning(f"清理数据库引擎时出错: {e}")
+
+    def _bootstrap_overnight_schema(self) -> None:
+        """Apply narrowly scoped schema upgrades for overnight tables."""
+        if self._engine.dialect.name != "sqlite":
+            return
+
+        with self._engine.begin() as connection:
+            table_names = {
+                row[0]
+                for row in connection.exec_driver_sql(
+                    "SELECT name FROM sqlite_master WHERE type='table'"
+                ).fetchall()
+            }
+
+            if "overnight_source_items" in table_names:
+                existing_columns = {
+                    row[1]
+                    for row in connection.exec_driver_sql(
+                        "PRAGMA table_info(overnight_source_items)"
+                    ).fetchall()
+                }
+                for column_name, column_sql in _OVERNIGHT_SOURCE_ITEM_BOOTSTRAP_COLUMNS:
+                    if column_name in existing_columns:
+                        continue
+                    connection.exec_driver_sql(
+                        f"ALTER TABLE overnight_source_items ADD COLUMN {column_name} {column_sql}"
+                    )
+
+            for table_name in ("overnight_document_families", "overnight_document_versions"):
+                if table_name in table_names:
+                    continue
+                Base.metadata.tables[table_name].create(bind=connection, checkfirst=True)
     
     def get_session(self) -> Session:
         """

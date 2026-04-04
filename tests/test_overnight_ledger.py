@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import os
+import sqlite3
 import tempfile
 from dataclasses import replace
 
@@ -183,3 +184,142 @@ def test_contradiction_detection_flags_numeric_tariff_conflict(
     assert contradictions[0].values == {15.0, 25.0}
     assert cluster.status == "contradictory"
     assert len(cluster.contradictions) == 1
+
+
+def test_single_item_with_multiple_tariff_facts_is_not_contradictory(
+    db_manager: DatabaseManager,
+) -> None:
+    repo = OvernightRepository(db_manager)
+    raw_id = repo.create_raw_record(
+        source_id="white_house_fact_sheet",
+        fetch_mode="manual",
+        payload_hash="payload-hash-multi-fact",
+    )
+
+    candidate = SourceCandidate(
+        candidate_type="article",
+        candidate_url="https://example.com/fact-sheet/tariffs",
+        candidate_title="Fact Sheet: steel tariff set at 25% and aluminum tariff set at 10%",
+        candidate_summary=(
+            "The administration said the steel tariff is 25% and the aluminum tariff is 10%."
+        ),
+        candidate_section="Fact Sheet",
+    )
+
+    stored_item = repo.persist_source_item(replace(normalize_candidate(candidate), raw_id=raw_id))
+
+    contradictions = find_contradictions([stored_item])
+    cluster = build_event_cluster([stored_item])
+
+    assert len(stored_item.numeric_facts) >= 2
+    assert contradictions == []
+    assert cluster.status == "confirmed"
+    assert cluster.contradictions == []
+
+
+def test_database_manager_upgrades_legacy_task1_overnight_schema_for_persistence() -> None:
+    temp_dir = tempfile.TemporaryDirectory()
+    db_path = os.path.join(temp_dir.name, "legacy_task1_overnight.db")
+    previous_db_path = os.environ.get("DATABASE_PATH")
+
+    connection = sqlite3.connect(db_path)
+    try:
+        connection.executescript(
+            """
+            CREATE TABLE overnight_raw_records (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                source_id VARCHAR(100) NOT NULL,
+                fetch_mode VARCHAR(32) NOT NULL,
+                payload_hash VARCHAR(128) NOT NULL,
+                created_at DATETIME
+            );
+            CREATE TABLE overnight_source_items (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                raw_id INTEGER NOT NULL,
+                canonical_url VARCHAR(1000) NOT NULL,
+                title VARCHAR(500) NOT NULL,
+                document_type VARCHAR(50) NOT NULL,
+                created_at DATETIME
+            );
+            CREATE TABLE overnight_event_clusters (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                core_fact TEXT NOT NULL UNIQUE,
+                event_type VARCHAR(64) NOT NULL,
+                event_subtype VARCHAR(64) NOT NULL,
+                created_at DATETIME,
+                updated_at DATETIME
+            );
+            """
+        )
+        connection.commit()
+    finally:
+        connection.close()
+
+    os.environ["DATABASE_PATH"] = db_path
+    Config.reset_instance()
+    DatabaseManager.reset_instance()
+
+    try:
+        db_manager = DatabaseManager.get_instance()
+        repo = OvernightRepository(db_manager)
+        raw_id = repo.create_raw_record(
+            source_id="legacy-upgrade-source",
+            fetch_mode="manual",
+            payload_hash="legacy-upgrade-payload",
+        )
+        candidate = SourceCandidate(
+            candidate_type="article",
+            candidate_url="https://example.com/legacy-upgrade",
+            candidate_title="USTR confirms 25% tariff on steel imports",
+            candidate_summary="Officials said the tariff rate remains 25% for steel imports.",
+            candidate_section="Press Release",
+        )
+
+        stored_item = repo.persist_source_item(replace(normalize_candidate(candidate), raw_id=raw_id))
+        family_id = repo.assign_document_family(
+            stored_item.id,
+            family_key=stored_item.canonical_url,
+            family_type="canonical_document",
+        )
+        version_id = repo.attach_document_version(
+            stored_item.id,
+            body_hash=stored_item.body_hash,
+            title_hash=stored_item.title_hash,
+        )
+        family_items = repo.list_source_items_by_family_key(stored_item.canonical_url)
+
+        inspect_connection = sqlite3.connect(db_path)
+        try:
+            source_item_columns = {
+                row[1] for row in inspect_connection.execute("PRAGMA table_info(overnight_source_items)")
+            }
+            family_tables = {
+                row[0]
+                for row in inspect_connection.execute(
+                    "SELECT name FROM sqlite_master WHERE type='table' AND name LIKE 'overnight_document_%'"
+                )
+            }
+        finally:
+            inspect_connection.close()
+
+        assert family_id > 0
+        assert version_id > 0
+        assert len(family_items) == 1
+        assert {
+            "summary",
+            "title_hash",
+            "body_hash",
+            "content_hash",
+            "normalized_entities",
+            "normalized_numeric_facts",
+            "family_id",
+        }.issubset(source_item_columns)
+        assert family_tables == {"overnight_document_families", "overnight_document_versions"}
+    finally:
+        DatabaseManager.reset_instance()
+        Config.reset_instance()
+        if previous_db_path is None:
+            os.environ.pop("DATABASE_PATH", None)
+        else:
+            os.environ["DATABASE_PATH"] = previous_db_path
+        temp_dir.cleanup()
