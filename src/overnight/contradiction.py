@@ -20,27 +20,33 @@ class ContradictionFlag:
 def find_contradictions(items: list[StoredSourceItem]) -> list[ContradictionFlag]:
     """Detect explicit numeric conflicts across normalized items."""
 
-    metric_values: dict[tuple[str, str], set[float]] = {}
-    metric_item_ids: dict[tuple[str, str], set[int]] = {}
+    metric_values: dict[tuple[str, str, str | None], set[float]] = {}
+    metric_item_ids: dict[tuple[str, str, str | None], set[int]] = {}
 
     for item in items:
         for fact in item.numeric_facts:
-            key = (fact.metric, fact.unit)
+            key = (fact.metric, fact.unit, fact.subject)
             metric_values.setdefault(key, set()).add(fact.value)
             metric_item_ids.setdefault(key, set()).add(item.id)
 
     contradictions: list[ContradictionFlag] = []
-    for (metric, unit), values in sorted(metric_values.items()):
-        item_ids = metric_item_ids[(metric, unit)]
+    for (metric, unit, subject), values in sorted(
+        metric_values.items(),
+        key=lambda item: (item[0][0], item[0][1], item[0][2] or ""),
+    ):
+        item_ids = metric_item_ids[(metric, unit, subject)]
         if len(values) < 2 or len(item_ids) < 2:
             continue
+        reason = f"Conflicting {metric} values found in {unit}."
+        if subject:
+            reason = f"Conflicting {metric} values found in {unit} for {subject}."
         contradictions.append(
             ContradictionFlag(
                 kind="numeric_conflict",
                 metric=metric,
                 values=values,
                 item_ids=item_ids,
-                reason=f"Conflicting {metric} values found in {unit}.",
+                reason=reason,
             )
         )
 

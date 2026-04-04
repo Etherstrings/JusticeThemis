@@ -217,6 +217,49 @@ def test_single_item_with_multiple_tariff_facts_is_not_contradictory(
     assert cluster.contradictions == []
 
 
+def test_matching_multi_fact_tariff_items_do_not_conflict_across_items(
+    db_manager: DatabaseManager,
+) -> None:
+    repo = OvernightRepository(db_manager)
+    raw_id_1 = repo.create_raw_record(
+        source_id="source-a",
+        fetch_mode="manual",
+        payload_hash="payload-hash-pair-a",
+    )
+    raw_id_2 = repo.create_raw_record(
+        source_id="source-b",
+        fetch_mode="manual",
+        payload_hash="payload-hash-pair-b",
+    )
+
+    candidate_1 = SourceCandidate(
+        candidate_type="article",
+        candidate_url="https://example.com/pair-a",
+        candidate_title="Steel tariff stays at 25% while aluminum tariff stays at 10%",
+        candidate_summary="Officials said the steel tariff remains 25% and the aluminum tariff remains 10%.",
+        candidate_section="Press Release",
+    )
+    candidate_2 = SourceCandidate(
+        candidate_type="article",
+        candidate_url="https://example.com/pair-b",
+        candidate_title="Update confirms steel tariff 25% and aluminum tariff 10%",
+        candidate_summary="The update confirmed the steel tariff at 25% and the aluminum tariff at 10%.",
+        candidate_section="Press Release",
+    )
+
+    stored_1 = repo.persist_source_item(replace(normalize_candidate(candidate_1), raw_id=raw_id_1))
+    stored_2 = repo.persist_source_item(replace(normalize_candidate(candidate_2), raw_id=raw_id_2))
+
+    contradictions = find_contradictions([stored_1, stored_2])
+    cluster = build_event_cluster([stored_1, stored_2])
+
+    assert len(stored_1.numeric_facts) >= 2
+    assert len(stored_2.numeric_facts) >= 2
+    assert contradictions == []
+    assert cluster.contradictions == []
+    assert cluster.status == "confirmed"
+
+
 def test_database_manager_upgrades_legacy_task1_overnight_schema_for_persistence() -> None:
     temp_dir = tempfile.TemporaryDirectory()
     db_path = os.path.join(temp_dir.name, "legacy_task1_overnight.db")
