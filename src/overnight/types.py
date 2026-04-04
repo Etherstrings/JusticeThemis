@@ -13,7 +13,7 @@ class SourceDefinition:
     organization_type: str
     source_class: str
     entry_type: str
-    entry_urls: list[str]
+    entry_urls: tuple[str, ...]
     priority: int
     poll_interval_seconds: int
     is_mission_critical: bool = False
@@ -21,6 +21,12 @@ class SourceDefinition:
 
 @dataclass(frozen=True)
 class SourceCandidate:
-    canonical_url: str
-    title: str
-    document_type: str
+    candidate_type: str
+    candidate_url: str
+    candidate_title: str
+    candidate_summary: str = ""
+    candidate_published_at: str | None = None
+    candidate_section: str | None = None
+    candidate_tags: tuple[str, ...] = ()
+    needs_article_fetch: bool = False
+    needs_attachment_fetch: bool = False
