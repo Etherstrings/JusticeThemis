@@ -123,7 +123,8 @@ class PriorityEngine:
         return 0
 
     def _score_market_reaction(self, event: MarketEvent) -> int:
-        return max(0, min(int(event.market_reaction_score), 10))
+        normalized = max(0.0, min(float(event.market_reaction_score), 1.0))
+        return int(round(normalized * 10))
 
     def _priority_for_score(self, score: int) -> str:
         if score >= self.p0_cutoff:
@@ -137,9 +138,7 @@ class PriorityEngine:
     def _delivery_policy_for_priority(self, priority: str) -> str:
         if _priority_rank(priority) <= _priority_rank(self.alert_threshold):
             return "night_alert_and_brief"
-        if priority in {"P0", "P1", "P2"}:
-            return "morning_brief_highlight"
-        return "digest_only"
+        return "morning_brief_highlight"
 
 
 def _event_text(event: MarketEvent) -> str:

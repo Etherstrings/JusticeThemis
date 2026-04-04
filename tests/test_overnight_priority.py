@@ -10,7 +10,12 @@ import pytest
 
 from src.config import Config
 from src.overnight.normalizer import NumericFact
-from src.overnight.market_context import MarketEvent, MarketSnapshot, build_market_link_set
+from src.overnight.market_context import (
+    MarketEvent,
+    MarketSnapshot,
+    build_market_link_set,
+    build_transmission_map,
+)
 from src.overnight.priority import PriorityEngine
 from src.repositories.overnight_repo import OvernightRepository
 from src.storage import DatabaseManager
@@ -41,9 +46,9 @@ def db_manager() -> DatabaseManager:
 
 def _official_trade_shock() -> MarketEvent:
     return MarketEvent(
-        core_fact="USTR announced a 25% tariff action targeting imports from China.",
-        title="USTR announces 25% tariff on selected Chinese imports",
-        summary="Official trade action signals a broader escalation with China.",
+        core_fact="USTR announced a 25% tariff action targeting steel imports from China.",
+        title="USTR announces 25% tariff on Chinese steel imports",
+        summary="Official trade action signals a broader escalation with China and industrial supply chains.",
         event_type="trade",
         event_subtype="tariff",
         source_id="ustr_press",
@@ -55,10 +60,11 @@ def _official_trade_shock() -> MarketEvent:
                 metric="tariff_rate",
                 value=25.0,
                 unit="percent",
-                context="25% tariff on selected Chinese imports.",
-                subject="imports",
+                context="25% tariff on Chinese steel imports.",
+                subject="steel",
             ),
         ),
+        market_reaction_score=0.8,
     )
 
 
@@ -69,6 +75,17 @@ def test_trade_tariff_market_links_include_usdcnh_and_brent() -> None:
     assert "Brent" in link_set.commodities
     assert "China" in link_set.regions
     assert "fx_repricing" in link_set.transmission_channels
+
+
+def test_transmission_map_is_derived_from_event_and_link_set() -> None:
+    event = _official_trade_shock()
+    link_set = build_market_link_set(event)
+
+    transmission_map = build_transmission_map(event, link_set)
+
+    assert transmission_map["trade_policy"] == ("import_costs", "supply_chain")
+    assert transmission_map["cross_border"] == ("fx_repricing",)
+    assert transmission_map["commodities"] == ("energy_demand", "industrial_input_costs")
 
 
 def test_priority_engine_promotes_official_trade_shock_and_alerts_at_night() -> None:
@@ -86,6 +103,7 @@ def test_priority_engine_promotes_official_trade_shock_and_alerts_at_night() -> 
     assert result.delivery_policy == "night_alert_and_brief"
     assert result.score_breakdown["officiality"] > 0
     assert result.score_breakdown["market_breadth"] > 0
+    assert result.score_breakdown["market_reaction"] > 0
 
 
 def test_priority_engine_uses_morning_highlight_when_alert_threshold_is_higher() -> None:
@@ -93,7 +111,7 @@ def test_priority_engine_uses_morning_highlight_when_alert_threshold_is_higher()
     link_set = build_market_link_set(event)
 
     result = PriorityEngine(
-        p0_cutoff=95,
+        p0_cutoff=105,
         p1_cutoff=60,
         alert_threshold="P0",
     ).score(event, link_set)
@@ -102,10 +120,31 @@ def test_priority_engine_uses_morning_highlight_when_alert_threshold_is_higher()
     assert result.delivery_policy == "morning_brief_highlight"
 
 
+def test_priority_engine_keeps_delivery_policy_inside_intermediate_layer() -> None:
+    result = PriorityEngine(
+        p0_cutoff=95,
+        p1_cutoff=70,
+        alert_threshold="P0",
+    ).score(
+        MarketEvent(
+            core_fact="Industry publication noted a tentative tariff discussion.",
+            title="Tariff discussion remains tentative",
+            summary="No official confirmation or broad market linkage yet.",
+            event_type="trade",
+            event_subtype="tariff",
+            market_reaction_score=0.1,
+        )
+    )
+
+    assert result.delivery_policy == "morning_brief_highlight"
+    assert result.delivery_policy in {"night_alert_and_brief", "morning_brief_highlight"}
+
+
 def test_market_snapshot_repo_round_trip(db_manager: DatabaseManager) -> None:
     repo = OvernightRepository(db_manager)
     event = _official_trade_shock()
     link_set = build_market_link_set(event)
+    transmission_map = build_transmission_map(event, link_set)
     cluster_id = repo.upsert_event_cluster(
         core_fact=event.core_fact,
         event_type=event.event_type,
@@ -116,9 +155,7 @@ def test_market_snapshot_repo_round_trip(db_manager: DatabaseManager) -> None:
         event_type=event.event_type,
         event_subtype=event.event_subtype,
         link_set=link_set,
-        transmission_map={
-            "trade_policy": ("import_costs", "supply_chain", "fx_repricing", "energy_demand")
-        },
+        transmission_map=transmission_map,
         rationale=(
             "official_ustr_source",
             "china_trade_shock",
@@ -133,9 +170,4 @@ def test_market_snapshot_repo_round_trip(db_manager: DatabaseManager) -> None:
     assert snapshots[0].id == snapshot_id
     assert snapshots[0].cluster_id == cluster_id
     assert "USDCNH" in snapshots[0].link_set.fx
-    assert snapshots[0].transmission_map["trade_policy"] == (
-        "import_costs",
-        "supply_chain",
-        "fx_repricing",
-        "energy_demand",
-    )
+    assert snapshots[0].transmission_map == transmission_map

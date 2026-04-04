@@ -23,7 +23,7 @@ class MarketEvent:
     organization_type: str = ""
     entities: tuple[str, ...] = ()
     numeric_facts: tuple[NumericFact, ...] = ()
-    market_reaction_score: int = 0
+    market_reaction_score: float = 0.0
 
 
 @dataclass(frozen=True)
@@ -157,6 +157,51 @@ def build_market_link_set(event: MarketEvent) -> MarketLinkSet:
     )
 
 
+def build_transmission_map(
+    event: MarketEvent,
+    link_set: MarketLinkSet | None = None,
+) -> dict[str, tuple[str, ...]]:
+    """Build a deterministic transmission map from event and link heuristics."""
+
+    market_links = link_set or build_market_link_set(event)
+    transmission_map: dict[str, tuple[str, ...]] = {}
+    text = _event_text(event)
+
+    if event.event_type.lower() == "trade" or "tariff" in text or "trade" in text:
+        trade_channels = _select_channels(
+            market_links,
+            ("import_costs", "supply_chain"),
+        )
+        if trade_channels:
+            transmission_map["trade_policy"] = trade_channels
+
+    if market_links.fx or "china" in text or "chinese" in text:
+        cross_border_channels = _select_channels(
+            market_links,
+            ("fx_repricing",),
+        )
+        if cross_border_channels:
+            transmission_map["cross_border"] = cross_border_channels
+
+    if market_links.commodities or market_links.sector_etfs:
+        commodities_channels = _select_channels(
+            market_links,
+            ("energy_demand", "industrial_input_costs", "technology_supply_chain"),
+        )
+        if commodities_channels:
+            transmission_map["commodities"] = commodities_channels
+
+    if market_links.rates:
+        rates_channels = _select_channels(
+            market_links,
+            ("fx_repricing",),
+        )
+        if rates_channels:
+            transmission_map["rates"] = rates_channels
+
+    return transmission_map
+
+
 def _event_text(event: MarketEvent) -> str:
     parts = (
         event.core_fact,
@@ -184,3 +229,11 @@ def _contains_subject(text: str, subjects: set[str], candidates: set[str]) -> bo
 
 def _sorted_tuple(values: set[str]) -> tuple[str, ...]:
     return tuple(sorted(values))
+
+
+def _select_channels(
+    link_set: MarketLinkSet,
+    ordered_candidates: tuple[str, ...],
+) -> tuple[str, ...]:
+    present = set(link_set.transmission_channels)
+    return tuple(channel for channel in ordered_candidates if channel in present)
