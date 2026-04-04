@@ -299,13 +299,14 @@
 
 ## 7. 采集入口类型
 
-系统至少支持以下六类入口：
+系统至少支持以下七类入口：
 
 - `rss`
 - `json_api`
 - `ics_calendar`
 - `section_page`
 - `article_page`
+- `filing_feed`
 - `pdf_document`
 
 每类入口都需要单独的采集与解析策略，不能使用单一爬虫统一处理。
@@ -386,6 +387,7 @@
 - `DocumentVersion`
 - `DocumentFamily`
 - `EventCluster`
+- `EventUpdate`
 - `MarketLinkSet`
 - `ReactionSnapshot`
 - `TransmissionMap`
@@ -393,6 +395,7 @@
 - `FlashAlert`
 - `MorningExecutiveBrief`
 - `DeepDiveReport`
+- `EvidenceLedgerView`
 - `DeliveryLog`
 
 ## 10. SourceDefinition
@@ -469,6 +472,7 @@
 - `section_card`
 - `article_stub`
 - `document_stub`
+- `filing_entry`
 - `calendar_entry`
 
 ## 13. SourceItem
@@ -1109,7 +1113,8 @@ Collector 至少拆成以下模块：
 - `topline`
 - `top_events`
 - `cross_asset_snapshot`
-- `what_likely_moves`
+- `likely_beneficiaries`
+- `likely_pressure_points`
 - `what_may_get_more_expensive`
 - `policy_radar`
 - `macro_radar`
@@ -1128,6 +1133,22 @@ Collector 至少拆成以下模块：
 - `digest_date`
 - `event_cards`
 - `appendix`
+- `generated_at`
+- `version_no`
+
+### 32.4 EvidenceLedgerView
+
+建议字段：
+
+- `ledger_view_id`
+- `digest_date`
+- `event_ids`
+- `source_item_ids`
+- `document_family_ids`
+- `official_evidence_ids`
+- `media_evidence_ids`
+- `market_snapshot_ids`
+- `analysis_artifact_ids`
 - `generated_at`
 - `version_no`
 
