@@ -378,6 +378,49 @@ class ConversationMessage(Base):
     created_at = Column(DateTime, default=datetime.now, index=True)
 
 
+class OvernightRawRecord(Base):
+    """原始抓取记录（overnight 基线）。"""
+
+    __tablename__ = "overnight_raw_records"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    source_id = Column(String(100), nullable=False, index=True)
+    fetch_mode = Column(String(32), nullable=False)
+    payload_hash = Column(String(128), nullable=False, unique=True, index=True)
+    created_at = Column(DateTime, default=datetime.now, index=True)
+
+
+class OvernightSourceItem(Base):
+    """归一化来源条目（关联原始记录）。"""
+
+    __tablename__ = "overnight_source_items"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    raw_id = Column(
+        Integer,
+        ForeignKey("overnight_raw_records.id"),
+        nullable=False,
+        index=True,
+    )
+    canonical_url = Column(String(1000), nullable=False, unique=True, index=True)
+    title = Column(String(500), nullable=False)
+    document_type = Column(String(50), nullable=False)
+    created_at = Column(DateTime, default=datetime.now, index=True)
+
+
+class OvernightEventCluster(Base):
+    """事件聚类基线表。"""
+
+    __tablename__ = "overnight_event_clusters"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    core_fact = Column(Text, nullable=False, unique=True)
+    event_type = Column(String(64), nullable=False, index=True)
+    event_subtype = Column(String(64), nullable=False, index=True)
+    created_at = Column(DateTime, default=datetime.now, index=True)
+    updated_at = Column(DateTime, default=datetime.now, onupdate=datetime.now)
+
+
 class DatabaseManager:
     """
     数据库管理器 - 单例模式

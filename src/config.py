@@ -185,6 +185,12 @@ class Config:
     backtest_min_age_days: int = 14
     backtest_engine_version: str = "v1"
     backtest_neutral_band_pct: float = 2.0
+
+    # === Overnight 简报配置 ===
+    overnight_brief_enabled: bool = False
+    overnight_digest_cutoff: str = "07:30"
+    overnight_priority_alert_threshold: str = "P0"
+    overnight_source_whitelist: str = ""
     
     # === 日志配置 ===
     log_dir: str = "./logs"  # 日志文件目录
@@ -470,6 +476,10 @@ class Config:
             backtest_min_age_days=int(os.getenv('BACKTEST_MIN_AGE_DAYS', '14')),
             backtest_engine_version=os.getenv('BACKTEST_ENGINE_VERSION', 'v1'),
             backtest_neutral_band_pct=float(os.getenv('BACKTEST_NEUTRAL_BAND_PCT', '2.0')),
+            overnight_brief_enabled=os.getenv('OVERNIGHT_BRIEF_ENABLED', 'false').lower() == 'true',
+            overnight_digest_cutoff=os.getenv('OVERNIGHT_DIGEST_CUTOFF', '07:30'),
+            overnight_priority_alert_threshold=os.getenv('OVERNIGHT_PRIORITY_ALERT_THRESHOLD', 'P0'),
+            overnight_source_whitelist=os.getenv('OVERNIGHT_SOURCE_WHITELIST', ''),
             log_dir=os.getenv('LOG_DIR', './logs'),
             log_level=os.getenv('LOG_LEVEL', 'INFO'),
             max_workers=int(os.getenv('MAX_WORKERS', '3')),
