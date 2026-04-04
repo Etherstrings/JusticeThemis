@@ -88,6 +88,54 @@ def test_transmission_map_is_derived_from_event_and_link_set() -> None:
     assert transmission_map["commodities"] == ("energy_demand", "industrial_input_costs")
 
 
+def test_china_non_trade_event_does_not_get_full_commodity_or_rates_basket() -> None:
+    link_set = build_market_link_set(
+        MarketEvent(
+            core_fact="China's finance ministry published a routine budget update.",
+            title="China issues routine fiscal update",
+            summary="The update covered local budget execution and did not include trade actions.",
+            event_type="macro",
+            event_subtype="fiscal_update",
+            entities=("China",),
+        )
+    )
+
+    assert link_set.fx == ("USDCNH",)
+    assert link_set.regions == ("China",)
+    assert link_set.commodities == ()
+    assert link_set.rates == ()
+    assert "energy_demand" not in link_set.transmission_channels
+    assert "industrial_input_costs" not in link_set.transmission_channels
+
+
+def test_transmission_map_uses_sector_bucket_for_technology_supply_chain() -> None:
+    event = MarketEvent(
+        core_fact="The USTR proposed semiconductor export controls affecting China supply chains.",
+        title="USTR targets semiconductor supply chain",
+        summary="Chip restrictions could reshape technology supply chains.",
+        event_type="trade",
+        event_subtype="export_control",
+        source_id="ustr_press",
+        source_class="policy",
+        organization_type="official_policy",
+        entities=("USTR", "China"),
+        numeric_facts=(
+            NumericFact(
+                metric="percentage",
+                value=5.0,
+                unit="percent",
+                context="Semiconductor exposure estimate of 5%.",
+                subject="semiconductor",
+            ),
+        ),
+    )
+
+    transmission_map = build_transmission_map(event, build_market_link_set(event))
+
+    assert transmission_map["sectors"] == ("technology_supply_chain",)
+    assert "commodities" not in transmission_map or "technology_supply_chain" not in transmission_map["commodities"]
+
+
 def test_priority_engine_promotes_official_trade_shock_and_alerts_at_night() -> None:
     event = _official_trade_shock()
     link_set = build_market_link_set(event)
@@ -104,6 +152,52 @@ def test_priority_engine_promotes_official_trade_shock_and_alerts_at_night() -> 
     assert result.score_breakdown["officiality"] > 0
     assert result.score_breakdown["market_breadth"] > 0
     assert result.score_breakdown["market_reaction"] > 0
+
+
+def test_priority_engine_handles_missing_market_reaction_score_safely() -> None:
+    result = PriorityEngine(
+        p0_cutoff=85,
+        p1_cutoff=60,
+        alert_threshold="P1",
+    ).score(
+        MarketEvent(
+            core_fact="Official tariff note omitted reaction data.",
+            title="USTR tariff note",
+            summary="No market reaction field was populated.",
+            event_type="trade",
+            event_subtype="tariff",
+            source_id="ustr_press",
+            source_class="policy",
+            organization_type="official_policy",
+            entities=("USTR",),
+            market_reaction_score=None,  # type: ignore[arg-type]
+        )
+    )
+
+    assert result.score_breakdown["market_reaction"] == 0
+
+
+def test_priority_engine_scores_market_reaction_boundary_deterministically() -> None:
+    result = PriorityEngine(
+        p0_cutoff=85,
+        p1_cutoff=60,
+        alert_threshold="P1",
+    ).score(
+        MarketEvent(
+            core_fact="Trade shock with measured market reaction.",
+            title="Trade shock reaction",
+            summary="Boundary input is used to verify deterministic scoring.",
+            event_type="trade",
+            event_subtype="tariff",
+            source_id="ustr_press",
+            source_class="policy",
+            organization_type="official_policy",
+            entities=("USTR", "China"),
+            market_reaction_score=0.85,
+        )
+    )
+
+    assert result.score_breakdown["market_reaction"] == 9
 
 
 def test_priority_engine_uses_morning_highlight_when_alert_threshold_is_higher() -> None:

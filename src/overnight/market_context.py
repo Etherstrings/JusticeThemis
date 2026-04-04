@@ -5,6 +5,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime
+import re
 
 from src.overnight.normalizer import NumericFact
 
@@ -99,17 +100,24 @@ _CHINA_KEYWORDS = ("china", "chinese")
 _ENERGY_KEYWORDS = ("oil", "energy", "crude", "brent")
 _INDUSTRIAL_SUBJECTS = {"steel", "aluminum", "aluminium", "copper", "autos", "vehicles"}
 _TECH_SUBJECTS = {"semiconductor", "chips", "chip"}
+_TRADE_SUBTYPES = {"tariff", "trade", "export_control", "export_curbs", "sanction"}
 
 
 def build_market_link_set(event: MarketEvent) -> MarketLinkSet:
     """Map a small overnight event view into market link buckets."""
 
     text = _event_text(event)
+    trade_context_text = _trade_context_text(event)
     subjects = {
         fact.subject.lower()
         for fact in event.numeric_facts
         if fact.subject
     }
+    has_trade_context = _has_trade_context(event, trade_context_text)
+    has_china_link = _contains_any(text, _CHINA_KEYWORDS)
+    has_energy_subject = _contains_subject(text, subjects, set(_ENERGY_KEYWORDS))
+    has_industrial_subject = _contains_subject(text, subjects, _INDUSTRIAL_SUBJECTS)
+    has_tech_subject = _contains_subject(text, subjects, _TECH_SUBJECTS)
 
     fx: set[str] = set()
     rates: set[str] = set()
@@ -119,29 +127,36 @@ def build_market_link_set(event: MarketEvent) -> MarketLinkSet:
     regions: set[str] = set()
     transmission_channels: set[str] = set()
 
-    if _contains_any(text, _TRADE_KEYWORDS) or event.event_type.lower() == "trade":
+    if has_trade_context:
         rates.add("US10Y")
         regions.add("United States")
         transmission_channels.update({"import_costs", "supply_chain", "risk_sentiment"})
 
-    if _contains_any(text, _CHINA_KEYWORDS):
+    if has_china_link:
         fx.add("USDCNH")
-        commodities.update({"Brent", "Copper"})
-        rates.add("CN10Y")
         regions.add("China")
-        transmission_channels.update({"fx_repricing", "energy_demand"})
+        transmission_channels.add("fx_repricing")
 
-    if _contains_any(text, _ENERGY_KEYWORDS):
+    if has_china_link and (has_trade_context or has_energy_subject or has_industrial_subject):
+        rates.add("CN10Y")
+        commodities.add("Brent")
+        transmission_channels.add("energy_demand")
+
+    if has_china_link and (has_trade_context or has_industrial_subject):
+        commodities.add("Copper")
+        transmission_channels.add("industrial_input_costs")
+
+    if has_energy_subject:
         commodities.add("Brent")
         sector_etfs.add("XLE")
         transmission_channels.add("energy_demand")
 
-    if _contains_subject(text, subjects, _INDUSTRIAL_SUBJECTS):
+    if has_industrial_subject:
         commodities.update({"Copper"})
         sector_etfs.update({"XLI", "XME"})
         transmission_channels.add("industrial_input_costs")
 
-    if _contains_subject(text, subjects, _TECH_SUBJECTS):
+    if has_tech_subject:
         sector_etfs.add("SOXX")
         companies.update({"NVDA", "TSM"})
         transmission_channels.add("technology_supply_chain")
@@ -186,10 +201,17 @@ def build_transmission_map(
     if market_links.commodities or market_links.sector_etfs:
         commodities_channels = _select_channels(
             market_links,
-            ("energy_demand", "industrial_input_costs", "technology_supply_chain"),
+            ("energy_demand", "industrial_input_costs"),
         )
         if commodities_channels:
             transmission_map["commodities"] = commodities_channels
+
+    sector_channels = _select_channels(
+        market_links,
+        ("technology_supply_chain",),
+    )
+    if sector_channels:
+        transmission_map["sectors"] = sector_channels
 
     if market_links.rates:
         rates_channels = _select_channels(
@@ -217,6 +239,35 @@ def _event_text(event: MarketEvent) -> str:
         " ".join(fact.subject or "" for fact in event.numeric_facts),
     )
     return " ".join(part for part in parts if part).lower()
+
+
+def _trade_context_text(event: MarketEvent) -> str:
+    parts = (
+        event.core_fact,
+        event.title,
+        event.event_type,
+        event.event_subtype,
+        event.source_id,
+        event.source_class,
+        event.organization_type,
+        " ".join(event.entities),
+        " ".join(fact.context for fact in event.numeric_facts),
+        " ".join(fact.subject or "" for fact in event.numeric_facts),
+    )
+    return " ".join(part for part in parts if part).lower()
+
+
+def _has_trade_context(event: MarketEvent, text: str) -> bool:
+    if event.event_type.lower() == "trade":
+        return True
+    if event.event_subtype.lower() in _TRADE_SUBTYPES:
+        return True
+    if "ustr" in text:
+        return True
+    return any(
+        re.search(rf"\b{re.escape(keyword)}\b", text)
+        for keyword in _TRADE_KEYWORDS
+    )
 
 
 def _contains_any(text: str, keywords: tuple[str, ...]) -> bool:

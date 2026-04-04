@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import math
 
 from src.config import get_config
 from src.overnight.market_context import MarketEvent, MarketLinkSet, build_market_link_set
@@ -123,8 +124,10 @@ class PriorityEngine:
         return 0
 
     def _score_market_reaction(self, event: MarketEvent) -> int:
-        normalized = max(0.0, min(float(event.market_reaction_score), 1.0))
-        return int(round(normalized * 10))
+        normalized = _normalize_market_reaction_score(event.market_reaction_score)
+        if normalized <= 0.0:
+            return 0
+        return int(math.ceil(normalized * 10))
 
     def _priority_for_score(self, score: int) -> str:
         if score >= self.p0_cutoff:
@@ -169,3 +172,15 @@ def _normalize_priority(value: str) -> str:
 
 def _priority_rank(priority: str) -> int:
     return {"P0": 0, "P1": 1, "P2": 2, "P3": 3}.get(_normalize_priority(priority), 0)
+
+
+def _normalize_market_reaction_score(value: object) -> float:
+    if value is None:
+        return 0.0
+    try:
+        numeric = float(value)
+    except (TypeError, ValueError):
+        return 0.0
+    if not math.isfinite(numeric):
+        return 0.0
+    return max(0.0, min(numeric, 1.0))
