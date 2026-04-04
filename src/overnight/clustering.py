@@ -18,6 +18,13 @@ def build_event_cluster(items: list[StoredSourceItem]) -> EventCluster:
     contradictions = find_contradictions(list(ordered_items))
 
     family_keys = {item.family_key or item.canonical_url for item in ordered_items}
+    if contradictions:
+        status = "contradictory"
+    elif len(ordered_items) > 1 and len(family_keys) == 1:
+        status = "developing"
+    else:
+        status = "confirmed"
+
     if len(ordered_items) > 1 and len(family_keys) == 1:
         event_update = EventUpdate(
             update_type="version_revised",
@@ -31,6 +38,7 @@ def build_event_cluster(items: list[StoredSourceItem]) -> EventCluster:
 
     return EventCluster(
         anchor_key=anchor_key,
+        status=status,
         items=ordered_items,
         event_update=event_update,
         contradictions=contradictions,

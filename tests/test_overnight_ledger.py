@@ -135,6 +135,7 @@ def test_repository_persists_versions_and_clusters_revisions(
     assert version_id_1 != version_id_2
     assert len(family_items) == 2
     assert cluster.anchor_key == stored_v1.canonical_url
+    assert cluster.status == "developing"
     assert cluster.event_update.update_type == "version_revised"
     assert cluster.contradictions == []
 
@@ -174,8 +175,11 @@ def test_contradiction_detection_flags_numeric_tariff_conflict(
     stored_2 = repo.persist_source_item(replace(normalize_candidate(candidate_2), raw_id=raw_id_2))
 
     contradictions = find_contradictions([stored_1, stored_2])
+    cluster = build_event_cluster([stored_1, stored_2])
 
     assert len(contradictions) == 1
     assert contradictions[0].kind == "numeric_conflict"
     assert contradictions[0].metric == "tariff_rate"
     assert contradictions[0].values == {15.0, 25.0}
+    assert cluster.status == "contradictory"
+    assert len(cluster.contradictions) == 1

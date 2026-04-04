@@ -42,6 +42,7 @@ class EventUpdate:
 @dataclass(frozen=True)
 class EventCluster:
     anchor_key: str
+    status: str
     items: tuple[StoredSourceItem, ...]
     event_update: EventUpdate
     contradictions: list[ContradictionFlag]
