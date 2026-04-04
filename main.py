@@ -119,6 +119,12 @@ def parse_arguments() -> argparse.Namespace:
     )
 
     parser.add_argument(
+        '--overnight-brief',
+        action='store_true',
+        help='运行隔夜简报流程（支持单次或定时）'
+    )
+
+    parser.add_argument(
         '--no-run-immediately',
         action='store_true',
         help='定时任务启动时不立即执行一次'
@@ -256,6 +262,25 @@ def _compute_trading_day_filter(
 
     should_skip_all = (not filtered_codes) and (effective_region or '') == ''
     return (filtered_codes, effective_region, should_skip_all)
+
+
+def _should_run_overnight_mode(args: argparse.Namespace, config: Config) -> bool:
+    """Resolve whether overnight mode should preempt the normal stock-analysis flow."""
+    if getattr(args, 'overnight_brief', False):
+        return True
+
+    if not getattr(config, 'overnight_brief_enabled', False):
+        return False
+
+    explicit_other_modes = (
+        getattr(args, 'backtest', False),
+        getattr(args, 'market_review', False),
+        getattr(args, 'webui', False),
+        getattr(args, 'webui_only', False),
+        getattr(args, 'serve', False),
+        getattr(args, 'serve_only', False),
+    )
+    return not any(explicit_other_modes)
 
 
 def run_full_analysis(
@@ -629,7 +654,49 @@ def main() -> int:
         return 0
 
     try:
-        # 模式0: 回测
+        # 模式0: 隔夜简报
+        if _should_run_overnight_mode(args, config):
+            logger.info("模式: 隔夜简报")
+            logger.info(f"隔夜简报截止时间: {config.overnight_digest_cutoff}")
+
+            from src.notification import NotificationService
+            from src.overnight.runner import OvernightRunner
+            from src.scheduler import Scheduler
+
+            runner = OvernightRunner(notifier=NotificationService())
+
+            if args.schedule or config.schedule_enabled:
+                scheduler = Scheduler(schedule_time=config.schedule_time)
+                should_run_immediately = config.schedule_run_immediately
+                if getattr(args, 'no_run_immediately', False):
+                    should_run_immediately = False
+
+                scheduler.set_overnight_task(
+                    lambda: runner.run_digest(
+                        cutoff_time=config.overnight_digest_cutoff,
+                        send_notification=not args.no_notify,
+                    ),
+                    digest_cutoff=config.overnight_digest_cutoff,
+                    run_immediately=should_run_immediately,
+                )
+                scheduler.run()
+                return 0
+
+            runner.run_digest(
+                cutoff_time=config.overnight_digest_cutoff,
+                send_notification=not args.no_notify,
+            )
+
+            if start_serve:
+                logger.info("API 服务运行中 (按 Ctrl+C 退出)...")
+                try:
+                    while True:
+                        time.sleep(1)
+                except KeyboardInterrupt:
+                    pass
+            return 0
+
+        # 模式1: 回测
         if getattr(args, 'backtest', False):
             logger.info("模式: 回测")
             from src.services.backtest_service import BacktestService
@@ -646,7 +713,7 @@ def main() -> int:
             )
             return 0
 
-        # 模式1: 仅大盘复盘
+        # 模式2: 仅大盘复盘
         if args.market_review:
             from src.analyzer import GeminiAnalyzer
             from src.core.market_review import run_market_review
@@ -701,7 +768,7 @@ def main() -> int:
             )
             return 0
 
-        # 模式2: 定时任务模式
+        # 模式3: 定时任务模式
         if args.schedule or config.schedule_enabled:
             logger.info("模式: 定时任务")
             logger.info(f"每日执行时间: {config.schedule_time}")
@@ -727,7 +794,7 @@ def main() -> int:
             )
             return 0
 
-        # 模式3: 正常单次运行
+        # 模式4: 正常单次运行
         if config.run_immediately:
             run_full_analysis(config, args, stock_codes)
         else:

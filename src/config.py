@@ -479,7 +479,11 @@ class Config:
             backtest_engine_version=os.getenv('BACKTEST_ENGINE_VERSION', 'v1'),
             backtest_neutral_band_pct=float(os.getenv('BACKTEST_NEUTRAL_BAND_PCT', '2.0')),
             overnight_brief_enabled=os.getenv('OVERNIGHT_BRIEF_ENABLED', 'false').lower() == 'true',
-            overnight_digest_cutoff=os.getenv('OVERNIGHT_DIGEST_CUTOFF', '07:30'),
+            overnight_digest_cutoff=cls._parse_hhmm_time(
+                os.getenv('OVERNIGHT_DIGEST_CUTOFF', '07:30'),
+                fallback='07:30',
+                env_name='OVERNIGHT_DIGEST_CUTOFF',
+            ),
             overnight_priority_alert_threshold=os.getenv('OVERNIGHT_PRIORITY_ALERT_THRESHOLD', 'P0'),
             overnight_priority_p0_score_cutoff=int(
                 os.getenv('OVERNIGHT_PRIORITY_P0_SCORE_CUTOFF', '85')
@@ -585,6 +589,20 @@ class Config:
             f"MARKET_REVIEW_REGION 配置值 '{value}' 无效，已回退为默认值 'cn'（合法值：cn / us / both）"
         )
         return 'cn'
+
+    @classmethod
+    def _parse_hhmm_time(cls, value: str, *, fallback: str, env_name: str) -> str:
+        """Parse HH:MM time values with fallback."""
+        import logging
+
+        candidate = (value or "").strip()
+        if re.fullmatch(r"([01]\d|2[0-3]):([0-5]\d)", candidate):
+            return candidate
+
+        logging.getLogger(__name__).warning(
+            f"{env_name} 配置值 '{value}' 无效，已回退为默认值 '{fallback}'（合法格式：HH:MM）"
+        )
+        return fallback
 
     @classmethod
     def _resolve_realtime_source_priority(cls) -> str:

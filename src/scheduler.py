@@ -19,7 +19,7 @@ import sys
 import time
 import threading
 from datetime import datetime
-from typing import Callable, Optional
+from typing import Callable
 
 logger = logging.getLogger(__name__)
 
@@ -79,7 +79,6 @@ class Scheduler:
         
         self.schedule_time = schedule_time
         self.shutdown_handler = GracefulShutdown()
-        self._task_callback: Optional[Callable] = None
         self._running = False
         
     def set_daily_task(self, task: Callable, run_immediately: bool = True):
@@ -90,32 +89,57 @@ class Scheduler:
             task: 要执行的任务函数（无参数）
             run_immediately: 是否在设置后立即执行一次
         """
-        self._task_callback = task
-        
         # 设置每日定时任务
-        self.schedule.every().day.at(self.schedule_time).do(self._safe_run_task)
+        self.schedule.every().day.at(self.schedule_time).do(
+            self._safe_run_task,
+            task,
+            "每日定时任务",
+        )
         logger.info(f"已设置每日定时任务，执行时间: {self.schedule_time}")
         
         if run_immediately:
             logger.info("立即执行一次任务...")
-            self._safe_run_task()
+            self._safe_run_task(task, "每日定时任务")
+
+    def set_overnight_task(
+        self,
+        task: Callable,
+        *,
+        digest_cutoff: str,
+        run_immediately: bool = False,
+    ):
+        """
+        设置隔夜简报定时任务
+
+        Args:
+            task: 要执行的任务函数（无参数）
+            digest_cutoff: 隔夜简报截止时间（HH:MM）
+            run_immediately: 是否在设置后立即执行一次
+        """
+        self.schedule.every().day.at(digest_cutoff).do(
+            self._safe_run_task,
+            task,
+            "隔夜简报任务",
+        )
+        logger.info(f"已设置隔夜简报任务，执行时间: {digest_cutoff}")
+
+        if run_immediately:
+            logger.info("立即执行一次隔夜简报任务...")
+            self._safe_run_task(task, "隔夜简报任务")
     
-    def _safe_run_task(self):
+    def _safe_run_task(self, task: Callable, task_name: str = "定时任务"):
         """安全执行任务（带异常捕获）"""
-        if self._task_callback is None:
-            return
-        
         try:
             logger.info("=" * 50)
-            logger.info(f"定时任务开始执行 - {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+            logger.info(f"{task_name}开始执行 - {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
             logger.info("=" * 50)
             
-            self._task_callback()
+            task()
             
-            logger.info(f"定时任务执行完成 - {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+            logger.info(f"{task_name}执行完成 - {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
             
         except Exception as e:
-            logger.exception(f"定时任务执行失败: {e}")
+            logger.exception(f"{task_name}执行失败: {e}")
     
     def run(self):
         """
