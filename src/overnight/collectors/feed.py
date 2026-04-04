@@ -3,6 +3,9 @@
 
 from __future__ import annotations
 
+from datetime import datetime
+from email.utils import parsedate_to_datetime
+
 import feedparser
 
 from src.overnight.types import SourceCandidate, SourceDefinition
@@ -17,6 +20,23 @@ def _fetch_payload(http_client: object, url: str) -> str:
     else:
         raise TypeError("http_client must be callable or expose fetch(url)")
     return payload.decode("utf-8") if isinstance(payload, bytes) else str(payload)
+
+
+def _normalize_feed_datetime(raw_value: str) -> str | None:
+    raw = raw_value.strip()
+    if not raw:
+        return None
+
+    try:
+        return parsedate_to_datetime(raw).isoformat()
+    except (TypeError, ValueError):
+        pass
+
+    try:
+        parsed = datetime.fromisoformat(raw.replace("Z", "+00:00"))
+        return parsed.isoformat()
+    except ValueError:
+        return raw
 
 
 class FeedCollector:
@@ -38,7 +58,8 @@ class FeedCollector:
                 continue
 
             summary = str(entry.get("summary", "")).strip()
-            published_at = str(entry.get("published", "") or entry.get("updated", "")).strip() or None
+            raw_published = str(entry.get("published", "") or entry.get("updated", "")).strip()
+            published_at = _normalize_feed_datetime(raw_published) if raw_published else None
             candidates.append(
                 SourceCandidate(
                     candidate_type="feed_item",

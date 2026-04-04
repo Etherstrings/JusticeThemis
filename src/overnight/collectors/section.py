@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+from datetime import datetime
 from urllib.parse import urljoin
 
 from bs4 import BeautifulSoup
@@ -30,6 +31,29 @@ def _card_tags(card: Tag, source: SourceDefinition) -> tuple[str, ...]:
     if "reuters" in source.source_id:
         tags.append("reuters")
     return tuple(tags)
+
+
+def _normalize_card_date(raw_value: str | None) -> str | None:
+    if raw_value is None:
+        return None
+    raw = raw_value.strip()
+    if not raw:
+        return None
+
+    try:
+        parsed = datetime.fromisoformat(raw.replace("Z", "+00:00"))
+        if "T" not in raw and " " not in raw:
+            return parsed.date().isoformat()
+        return parsed.isoformat()
+    except ValueError:
+        pass
+
+    for pattern in ("%B %d, %Y", "%b %d, %Y", "%Y-%m-%d"):
+        try:
+            return datetime.strptime(raw, pattern).date().isoformat()
+        except ValueError:
+            continue
+    return raw
 
 
 class SectionCollector:
@@ -61,7 +85,8 @@ class SectionCollector:
             time_node = card.find("time")
             published_at = None
             if time_node is not None:
-                published_at = (time_node.get("datetime") or time_node.get_text(" ", strip=True)).strip() or None
+                raw_datetime = (time_node.get("datetime") or time_node.get_text(" ", strip=True)).strip() or None
+                published_at = _normalize_card_date(raw_datetime)
 
             candidates.append(
                 SourceCandidate(

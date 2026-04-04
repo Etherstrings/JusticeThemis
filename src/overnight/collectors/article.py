@@ -28,6 +28,39 @@ def canonicalize_url(url: str) -> str:
     return urlunsplit((parts.scheme, parts.netloc, path, "", ""))
 
 
+def _extract_summary_from_content(soup: BeautifulSoup) -> str:
+    description_meta = soup.find("meta", attrs={"name": "description"})
+    if description_meta and description_meta.get("content"):
+        return str(description_meta["content"]).strip()
+
+    for container_name in ("article", "main"):
+        container = soup.find(container_name)
+        if container is None:
+            continue
+        paragraph = container.find("p")
+        if paragraph is not None:
+            text = paragraph.get_text(" ", strip=True)
+            if text:
+                return text
+
+    headline = soup.find("h1")
+    if headline is not None:
+        paragraph = headline.find_next("p")
+        if paragraph is not None:
+            text = paragraph.get_text(" ", strip=True)
+            if text:
+                return text
+
+    body = soup.find("body")
+    if body is None:
+        return ""
+    for paragraph in body.find_all("p"):
+        text = paragraph.get_text(" ", strip=True)
+        if text:
+            return text
+    return ""
+
+
 def extract_article_shell(html: str, fallback_url: str) -> tuple[str, str, str]:
     soup = BeautifulSoup(html, "lxml")
 
@@ -46,13 +79,7 @@ def extract_article_shell(html: str, fallback_url: str) -> tuple[str, str, str]:
     elif title_node:
         title = title_node.get_text(" ", strip=True)
 
-    description_meta = soup.find("meta", attrs={"name": "description"})
-    paragraph = soup.find("p")
-    summary = ""
-    if description_meta and description_meta.get("content"):
-        summary = str(description_meta["content"]).strip()
-    elif paragraph:
-        summary = paragraph.get_text(" ", strip=True)
+    summary = _extract_summary_from_content(soup)
 
     return canonical_url, title, summary
 

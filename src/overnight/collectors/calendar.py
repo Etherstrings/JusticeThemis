@@ -57,8 +57,10 @@ class CalendarCollector:
                 continue
 
             candidate_url = page_url
+            needs_article_fetch = False
             if release_link is not None:
                 candidate_url = urljoin(page_url, str(release_link["href"]).strip())
+                needs_article_fetch = True
 
             candidates.append(
                 SourceCandidate(
@@ -69,7 +71,7 @@ class CalendarCollector:
                     candidate_published_at=published_at,
                     candidate_section=source.display_name,
                     candidate_tags=("calendar",),
-                    needs_article_fetch=True,
+                    needs_article_fetch=needs_article_fetch,
                     needs_attachment_fetch=False,
                 )
             )
