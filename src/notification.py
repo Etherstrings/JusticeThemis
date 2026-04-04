@@ -408,6 +408,176 @@ class NotificationService:
             content: Markdown 格式内容
         """
         return self._send_via_source_context(content)
+
+    def format_overnight_flash_alert(self, alert: Any) -> str:
+        """Render an overnight flash alert as markdown content."""
+        alert_id = self._overnight_get_value(alert, "alert_id", "")
+        headline = self._overnight_get_value(alert, "headline", "")
+        event_id = self._overnight_get_value(alert, "event_id", "")
+        priority_level = self._overnight_get_value(alert, "priority_level", "")
+        core_fact = self._overnight_get_value(alert, "core_fact", "")
+        market_reaction = self._overnight_get_value(alert, "market_reaction", "")
+        confidence = self._overnight_get_value(alert, "confidence", None)
+        watch_next = self._overnight_get_value(alert, "watch_next", []) or []
+        sent_at = self._overnight_get_value(alert, "sent_at", "")
+
+        if isinstance(watch_next, str):
+            watch_items = [watch_next]
+        elif isinstance(watch_next, (list, tuple)):
+            watch_items = [str(item) for item in watch_next if str(item).strip()]
+        else:
+            watch_items = []
+
+        lines = [
+            "# 🚨 Overnight Flash Alert",
+            "",
+        ]
+        if alert_id:
+            lines.append(f"**Alert ID**: {alert_id}")
+        if headline:
+            lines.append(f"**Headline**: {headline}")
+        if event_id:
+            lines.append(f"**Event ID**: {event_id}")
+        if priority_level:
+            lines.append(f"**Priority**: {priority_level}")
+        if core_fact and core_fact != headline:
+            lines.append(f"**Core Fact**: {core_fact}")
+        if market_reaction:
+            lines.append(f"**Market Reaction**: {market_reaction}")
+        if confidence is not None:
+            lines.append(f"**Confidence**: {float(confidence):.2f}")
+        if sent_at:
+            lines.append(f"**Sent At**: {sent_at}")
+
+        lines.extend([
+            "",
+            "## Watch Next",
+        ])
+        if watch_items:
+            lines.extend(f"- {item}" for item in watch_items)
+        else:
+            lines.append("- Monitor primary source confirmations and market pricing follow-through.")
+        return "\n".join(lines)
+
+    def format_overnight_brief(self, brief: Any) -> str:
+        """Render an overnight morning brief as markdown content."""
+        digest_date = self._overnight_get_value(brief, "digest_date", datetime.now().strftime('%Y-%m-%d'))
+        cutoff_time = self._overnight_get_value(brief, "cutoff_time", "07:30")
+        topline = self._overnight_get_value(
+            brief,
+            "topline",
+            "No high-priority overnight catalysts were confirmed before cutoff.",
+        )
+
+        lines = [
+            f"# 🌅 {digest_date} Morning Executive Brief",
+            "",
+            f"> Cutoff: **{cutoff_time}**",
+            "",
+            "## Overnight Topline",
+            topline,
+            "",
+        ]
+
+        self._append_overnight_section(lines, "Top Events", self._overnight_get_value(brief, "top_events", []))
+        self._append_overnight_section(
+            lines,
+            "Cross-Asset Snapshot",
+            self._overnight_get_value(brief, "cross_asset_snapshot", []),
+        )
+        self._append_overnight_section(
+            lines,
+            "Likely Beneficiaries",
+            self._overnight_get_value(brief, "likely_beneficiaries", []),
+        )
+        self._append_overnight_section(
+            lines,
+            "Likely Pressure Points",
+            self._overnight_get_value(brief, "likely_pressure_points", []),
+        )
+        self._append_overnight_section(
+            lines,
+            "What May Get More Expensive",
+            self._overnight_get_value(brief, "what_may_get_more_expensive", []),
+        )
+        self._append_overnight_section(
+            lines,
+            "Official Policy Radar",
+            self._overnight_get_value(brief, "policy_radar", []),
+        )
+        self._append_overnight_section(
+            lines,
+            "Need Confirmation",
+            self._overnight_get_value(brief, "need_confirmation", []),
+        )
+        self._append_overnight_section(
+            lines,
+            "Today Watchlist",
+            self._overnight_get_value(brief, "today_watchlist", []),
+        )
+        self._append_overnight_section(
+            lines,
+            "Primary Sources",
+            self._overnight_get_value(brief, "primary_sources", []),
+        )
+        return "\n".join(lines)
+
+    def send_overnight_flash_alert(self, alert: Any) -> bool:
+        """Format and send overnight flash alert."""
+        return self.send(self.format_overnight_flash_alert(alert))
+
+    def send_overnight_brief(self, brief: Any) -> bool:
+        """Format and send overnight morning brief."""
+        return self.send(self.format_overnight_brief(brief))
+
+    @staticmethod
+    def _overnight_get_value(payload: Any, field_name: str, default: Any) -> Any:
+        if isinstance(payload, dict):
+            return payload.get(field_name, default)
+        return getattr(payload, field_name, default)
+
+    @staticmethod
+    def _append_overnight_section(lines: List[str], title: str, entries: Any) -> None:
+        lines.extend([f"## {title}"])
+        if not entries:
+            lines.extend(["- None.", ""])
+            return
+
+        if isinstance(entries, dict):
+            entries = [entries]
+        if not isinstance(entries, (list, tuple)):
+            entries = [entries]
+
+        for entry in entries:
+            if isinstance(entry, dict):
+                label = entry.get("title") or entry.get("core_fact") or entry.get("event_id") or "Item"
+                lines.append(f"- {label}")
+                items = entry.get("items")
+                for key, label_text in (
+                    ("priority_level", "Priority"),
+                    ("summary", "Summary"),
+                    ("why_it_matters", "Why it matters"),
+                    ("confidence", "Confidence"),
+                    ("market_reaction", "Market reaction"),
+                ):
+                    value = entry.get(key)
+                    if value in (None, "", []):
+                        continue
+                    lines.append(f"  - {label_text}: {value}")
+                if isinstance(items, (list, tuple)):
+                    for item in items:
+                        lines.append(f"  - {item}")
+                elif items:
+                    lines.append(f"  - {items}")
+                links = entry.get("links") or entry.get("source_links")
+                if isinstance(links, (list, tuple)):
+                    for link in links:
+                        lines.append(f"  - Source: {link}")
+                elif links:
+                    lines.append(f"  - Source: {links}")
+            else:
+                lines.append(f"- {entry}")
+        lines.append("")
     
     def generate_daily_report(
         self,
