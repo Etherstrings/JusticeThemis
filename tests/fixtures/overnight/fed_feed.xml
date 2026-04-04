@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="utf-8"?>
+<rss version="2.0">
+  <channel>
+    <title>Federal Reserve Press Releases</title>
+    <link>https://www.federalreserve.gov/newsevents/pressreleases.htm</link>
+    <description>Federal Reserve Board press releases.</description>
+    <item>
+      <title>Federal Reserve issues FOMC statement</title>
+      <link>https://www.federalreserve.gov/newsevents/pressreleases/monetary20260403a.htm</link>
+      <description>The Federal Reserve left the target range unchanged.</description>
+      <pubDate>Fri, 03 Apr 2026 14:00:00 GMT</pubDate>
+    </item>
+    <item>
+      <title>Federal Reserve announces discount rate action</title>
+      <link>https://www.federalreserve.gov/newsevents/pressreleases/other20260402a.htm</link>
+      <description>Board approved the discount rate request from reserve banks.</description>
+      <pubDate>Thu, 02 Apr 2026 19:00:00 GMT</pubDate>
+    </item>
+  </channel>
+</rss>
