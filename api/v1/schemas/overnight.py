@@ -44,3 +44,22 @@ class OvernightEventResponse(BaseModel):
     summary: str = Field("", description="Summary")
     why_it_matters: str = Field("", description="Why it matters")
     confidence: float = Field(0.0, description="Confidence score")
+
+
+class OvernightBriefHistoryItemResponse(BaseModel):
+    """Summary item for persisted overnight brief history."""
+
+    brief_id: str = Field(..., description="Overnight brief id")
+    digest_date: str = Field(..., description="Digest date (YYYY-MM-DD)")
+    cutoff_time: str = Field(..., description="Digest cutoff time (HH:MM)")
+    topline: str = Field(..., description="Topline summary")
+    generated_at: str = Field(..., description="Generation timestamp")
+
+
+class OvernightBriefHistoryResponse(BaseModel):
+    """Paginated overnight brief history response."""
+
+    total: int = Field(..., description="Total number of persisted briefs")
+    page: int = Field(..., description="Current page")
+    limit: int = Field(..., description="Page size")
+    items: list[OvernightBriefHistoryItemResponse] = Field(default_factory=list, description="Persisted brief list")

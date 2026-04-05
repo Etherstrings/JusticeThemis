@@ -8,13 +8,15 @@ from datetime import datetime
 import json
 from typing import Optional
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 
+from src.overnight.brief_builder import MorningExecutiveBrief
 from src.overnight.market_context import MarketLinkSet, MarketSnapshot
 from src.overnight.ledger import StoredSourceItem
 from src.overnight.normalizer import EntityMention, NormalizedSourceItem, NumericFact
 from src.storage import (
     DatabaseManager,
+    OvernightBriefArtifact,
     OvernightDocumentFamily,
     OvernightDocumentVersion,
     OvernightEventCluster,
@@ -241,6 +243,88 @@ class OvernightRepository:
             ).scalars().all()
             return [self._to_market_snapshot(row) for row in rows]
 
+    def save_morning_brief(self, brief: MorningExecutiveBrief) -> str:
+        payload_json = json.dumps(asdict(brief), ensure_ascii=True, sort_keys=True)
+
+        with self.db.get_session() as session:
+            existing = session.execute(
+                select(OvernightBriefArtifact)
+                .where(OvernightBriefArtifact.brief_id == brief.brief_id)
+                .limit(1)
+            ).scalar_one_or_none()
+
+            if existing is None:
+                row = OvernightBriefArtifact(
+                    brief_id=brief.brief_id,
+                    digest_date=brief.digest_date,
+                    cutoff_time=brief.cutoff_time,
+                    topline=brief.topline,
+                    generated_at=brief.generated_at,
+                    payload_json=payload_json,
+                )
+                session.add(row)
+            else:
+                existing.digest_date = brief.digest_date
+                existing.cutoff_time = brief.cutoff_time
+                existing.topline = brief.topline
+                existing.generated_at = brief.generated_at
+                existing.payload_json = payload_json
+
+            session.commit()
+            return brief.brief_id
+
+    def get_latest_morning_brief(self) -> MorningExecutiveBrief | None:
+        with self.db.get_session() as session:
+            row = session.execute(
+                select(OvernightBriefArtifact)
+                .order_by(OvernightBriefArtifact.created_at.desc(), OvernightBriefArtifact.id.desc())
+                .limit(1)
+            ).scalar_one_or_none()
+            if row is None:
+                return None
+            return self._to_morning_brief(row)
+
+    def get_morning_brief(self, brief_id: str) -> MorningExecutiveBrief | None:
+        with self.db.get_session() as session:
+            row = session.execute(
+                select(OvernightBriefArtifact)
+                .where(OvernightBriefArtifact.brief_id == brief_id)
+                .limit(1)
+            ).scalar_one_or_none()
+            if row is None:
+                return None
+            return self._to_morning_brief(row)
+
+    def list_morning_briefs(self, *, page: int, limit: int) -> dict[str, object]:
+        offset = max(page - 1, 0) * limit
+
+        with self.db.get_session() as session:
+            total = session.execute(
+                select(func.count()).select_from(OvernightBriefArtifact)
+            ).scalar_one()
+            rows = session.execute(
+                select(OvernightBriefArtifact)
+                .order_by(OvernightBriefArtifact.created_at.desc(), OvernightBriefArtifact.id.desc())
+                .offset(offset)
+                .limit(limit)
+            ).scalars().all()
+
+        return {
+            "page": page,
+            "limit": limit,
+            "total": int(total),
+            "items": [
+                {
+                    "brief_id": row.brief_id,
+                    "digest_date": row.digest_date,
+                    "cutoff_time": row.cutoff_time,
+                    "topline": row.topline,
+                    "generated_at": row.generated_at,
+                }
+                for row in rows
+            ],
+        }
+
     def _to_stored_item(
         self,
         row: OvernightSourceItem,
@@ -289,3 +373,7 @@ class OvernightRepository:
             rationale=tuple(rationale_payload),
             created_at=row.created_at,
         )
+
+    def _to_morning_brief(self, row: OvernightBriefArtifact) -> MorningExecutiveBrief:
+        payload = json.loads(row.payload_json)
+        return MorningExecutiveBrief(**payload)

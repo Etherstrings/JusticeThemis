@@ -9,6 +9,7 @@ from sqlalchemy import text
 
 from src.config import Config
 from src.core.config_registry import get_field_definition
+from src.overnight.brief_builder import RankedEvent, build_morning_brief
 from src.storage import DatabaseManager
 
 
@@ -157,6 +158,47 @@ class OvernightStorageTestCase(unittest.TestCase):
 
         self.assertEqual(raw_count, 2)
         self.assertEqual(item_count, 2)
+
+    def test_overnight_repository_persists_morning_briefs(self) -> None:
+        from src.repositories.overnight_repo import OvernightRepository
+
+        repo = OvernightRepository(self.db)
+        brief = build_morning_brief(
+            events=[
+                RankedEvent(
+                    event_id="event_123",
+                    core_fact="Fed left policy guidance unchanged.",
+                    priority_level="P1",
+                    summary="The latest overnight policy event stayed on hold.",
+                    why_it_matters="Rates-sensitive assets remain in focus.",
+                    confidence=0.81,
+                    source_links=["https://www.federalreserve.gov/example-release"],
+                )
+            ],
+            direction_board=[],
+            price_pressure_board=[],
+            digest_date="2026-04-05",
+            cutoff_time="07:30",
+            generated_at="2026-04-05T07:31:00",
+        )
+
+        repo.save_morning_brief(brief)
+
+        latest = repo.get_latest_morning_brief()
+        history = repo.list_morning_briefs(page=1, limit=10)
+
+        self.assertIsNotNone(latest)
+        assert latest is not None
+        self.assertEqual(latest.brief_id, brief.brief_id)
+        self.assertEqual(history["total"], 1)
+        self.assertEqual(history["items"][0]["brief_id"], brief.brief_id)
+
+        with self.db.get_session() as session:
+            brief_count = session.execute(
+                text("SELECT COUNT(1) FROM overnight_brief_artifacts")
+            ).scalar_one()
+
+        self.assertEqual(brief_count, 1)
 
 
 if __name__ == "__main__":

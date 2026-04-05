@@ -8,6 +8,7 @@ from typing import Any
 from src.config import get_config
 from src.overnight.brief_builder import MorningExecutiveBrief
 from src.overnight.runner import OvernightRunner
+from src.repositories.overnight_repo import OvernightRepository
 
 
 class OvernightBriefNotFoundError(LookupError):
@@ -21,10 +22,19 @@ class OvernightEventNotFoundError(LookupError):
 class OvernightService:
     """Provide overnight brief and event detail payloads for API consumers."""
 
-    def __init__(self, runner: OvernightRunner | None = None) -> None:
+    def __init__(
+        self,
+        runner: OvernightRunner | None = None,
+        repo: OvernightRepository | None = None,
+    ) -> None:
         self.runner = runner or OvernightRunner()
+        self.repo = repo or OvernightRepository()
 
     def get_latest_brief(self) -> MorningExecutiveBrief:
+        latest = self.repo.get_latest_morning_brief()
+        if latest is not None and latest.top_events:
+            return latest
+
         config = get_config()
         result = self.runner.run_digest(
             cutoff_time=config.overnight_digest_cutoff,
@@ -33,6 +43,12 @@ class OvernightService:
         brief = result.morning_brief
         if not brief.top_events:
             raise OvernightBriefNotFoundError("No overnight brief is available yet.")
+        return brief
+
+    def get_brief_by_id(self, brief_id: str) -> MorningExecutiveBrief:
+        brief = self.repo.get_morning_brief(brief_id)
+        if brief is None:
+            raise OvernightBriefNotFoundError(f"Overnight brief not found: {brief_id}")
         return brief
 
     def get_event_detail(self, event_id: str) -> dict[str, Any]:
@@ -51,18 +67,14 @@ class OvernightService:
         raise OvernightEventNotFoundError(event_id)
 
     def list_history(self, *, page: int, limit: int) -> dict[str, Any]:
-        brief = self.get_latest_brief()
-        return {
-            "page": page,
-            "limit": limit,
-            "total": 1,
-            "items": [
-                {
-                    "brief_id": brief.brief_id,
-                    "digest_date": brief.digest_date,
-                    "cutoff_time": brief.cutoff_time,
-                    "topline": brief.topline,
-                    "generated_at": brief.generated_at,
-                }
-            ],
-        }
+        history = self.repo.list_morning_briefs(page=page, limit=limit)
+        if int(history.get("total", 0) or 0) > 0:
+            return history
+
+        # Fallback to generating the latest brief once, then reloading persisted history.
+        self.get_latest_brief()
+        history = self.repo.list_morning_briefs(page=page, limit=limit)
+        if int(history.get("total", 0) or 0) > 0:
+            return history
+
+        raise OvernightBriefNotFoundError("No overnight brief history is available yet.")

@@ -12,6 +12,7 @@ from sqlalchemy import select
 
 from src.notification import NotificationService
 from src.overnight.brief_builder import MorningExecutiveBrief, RankedEvent, build_morning_brief
+from src.repositories.overnight_repo import OvernightRepository
 from src.storage import DatabaseManager, OvernightEventCluster
 
 logger = logging.getLogger(__name__)
@@ -77,6 +78,7 @@ class OvernightRunner:
         *,
         repo: RankedEventRepository | None = None,
         notifier: OvernightNotifier | None = None,
+        storage_repo: OvernightRepository | None = None,
         now_provider: Callable[[], datetime] | None = None,
     ) -> None:
         if repo is None:
@@ -92,6 +94,7 @@ class OvernightRunner:
             )
 
         self.notifier = notifier or NotificationService()
+        self.storage_repo = storage_repo or OvernightRepository()
 
     def run_digest(self, *, cutoff_time: str, send_notification: bool = True) -> OvernightRunResult:
         events = list(self.repo.list_ranked_events(cutoff_time=cutoff_time))
@@ -101,6 +104,7 @@ class OvernightRunner:
             price_pressure_board=self._build_prices(events),
             cutoff_time=cutoff_time,
         )
+        self.storage_repo.save_morning_brief(brief)
         if send_notification:
             self.notifier.send_overnight_brief(brief)
         return OvernightRunResult(morning_brief=brief, sent_alerts=[])

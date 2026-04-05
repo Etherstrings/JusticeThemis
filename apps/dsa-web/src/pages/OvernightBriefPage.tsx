@@ -1,13 +1,13 @@
 import type React from 'react';
 import { useEffect, useMemo, useState } from 'react';
 import { overnightApi, OvernightBriefUnavailableError } from '../api/overnight';
-import { Badge, Card } from '../components/common';
+import { Badge, Card, Pagination } from '../components/common';
 import { OvernightEventCard } from '../components/overnight/OvernightEventCard';
 import { OvernightSummaryPanel } from '../components/overnight/OvernightSummaryPanel';
 import type {
   OvernightBoardItem,
   OvernightBrief,
-  OvernightEventDetail,
+  OvernightBriefHistoryItem,
   OvernightEventSummary,
   OvernightPrimarySourceGroup,
   OvernightWatchBucket,
@@ -162,16 +162,88 @@ const SourceList: React.FC<{ links: string[] }> = ({ links }) => (
   </div>
 );
 
+const HistoryPanel: React.FC<{
+  items: OvernightBriefHistoryItem[];
+  activeBriefId?: string | null;
+  isLoading: boolean;
+  currentPage: number;
+  totalPages: number;
+  onSelect: (briefId: string) => void;
+  onPageChange: (page: number) => void;
+}> = ({ items, activeBriefId, isLoading, currentPage, totalPages, onSelect, onPageChange }) => (
+  <Card variant="bordered" padding="md">
+    <div className="flex items-center justify-between gap-3">
+      <div>
+        <div className="text-xs uppercase tracking-[0.2em] text-muted">History View</div>
+        <h3 className="mt-1 text-lg font-semibold text-white">按天回看晨报</h3>
+      </div>
+      <Badge variant="history">{items.length}</Badge>
+    </div>
+
+    {isLoading ? (
+      <div className="mt-4 text-sm text-secondary">正在加载历史晨报...</div>
+    ) : items.length === 0 ? (
+      <div className="mt-4 text-sm text-secondary">还没有可回看的隔夜晨报归档。</div>
+    ) : (
+      <div className="mt-4 space-y-3">
+        {items.map((item) => (
+          <button
+            key={item.briefId}
+            type="button"
+            onClick={() => onSelect(item.briefId)}
+            className={`w-full rounded-2xl border px-4 py-3 text-left transition ${
+              item.briefId === activeBriefId
+                ? 'border-cyan/30 bg-cyan/8'
+                : 'border-white/6 bg-white/[0.02] hover:border-white/12 hover:bg-white/[0.03]'
+            }`}
+          >
+            <div className="flex items-center justify-between gap-3">
+              <div className="text-sm font-medium text-white">{item.digestDate}</div>
+              <Badge variant={item.briefId === activeBriefId ? 'info' : 'default'}>
+                {item.cutoffTime}
+              </Badge>
+            </div>
+            <div className="mt-2 text-sm leading-6 text-secondary">{item.topline}</div>
+            <div className="mt-2 text-xs text-muted">{item.generatedAt.replace('T', ' ')}</div>
+          </button>
+        ))}
+      </div>
+    )}
+
+    <Pagination
+      className="mt-4 justify-start"
+      currentPage={currentPage}
+      totalPages={totalPages}
+      onPageChange={onPageChange}
+    />
+  </Card>
+);
+
 const OvernightBriefPage: React.FC = () => {
+  const historyPageSize = 6;
   const [brief, setBrief] = useState<OvernightBrief | null>(null);
   const [selectedEventId, setSelectedEventId] = useState<string | null>(null);
-  const [selectedEventDetail, setSelectedEventDetail] = useState<OvernightEventDetail | null>(null);
   const [isLoading, setIsLoading] = useState(true);
-  const [isLoadingDetail, setIsLoadingDetail] = useState(false);
+  const [isHistoryLoading, setIsHistoryLoading] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [emptyMessage, setEmptyMessage] = useState<string | null>(null);
+  const [historyItems, setHistoryItems] = useState<OvernightBriefHistoryItem[]>([]);
+  const [historyPage, setHistoryPage] = useState(1);
+  const [historyTotal, setHistoryTotal] = useState(0);
 
-  const loadBrief = async () => {
+  const loadHistory = async (page = 1) => {
+    setIsHistoryLoading(true);
+    try {
+      const response = await overnightApi.getHistory(page, historyPageSize);
+      setHistoryItems(response.items);
+      setHistoryPage(response.page);
+      setHistoryTotal(response.total);
+    } finally {
+      setIsHistoryLoading(false);
+    }
+  };
+
+  const loadLatestBrief = async () => {
     setIsLoading(true);
     setLoadError(null);
 
@@ -179,6 +251,7 @@ const OvernightBriefPage: React.FC = () => {
       const nextBrief = await overnightApi.getLatestBrief();
       setBrief(nextBrief);
       setEmptyMessage(null);
+      await loadHistory(1);
       setSelectedEventId((current) => {
         if (current && nextBrief.topEvents.some((item) => item.eventId === current)) {
           return current;
@@ -190,6 +263,8 @@ const OvernightBriefPage: React.FC = () => {
       setSelectedEventId(null);
       if (error instanceof OvernightBriefUnavailableError) {
         setEmptyMessage(error.message);
+        setHistoryItems([]);
+        setHistoryTotal(0);
         return;
       }
       setLoadError(error instanceof Error ? error.message : '加载隔夜晨报失败');
@@ -199,41 +274,8 @@ const OvernightBriefPage: React.FC = () => {
   };
 
   useEffect(() => {
-    void loadBrief();
+    void loadLatestBrief();
   }, []);
-
-  useEffect(() => {
-    if (!selectedEventId) {
-      setSelectedEventDetail(null);
-      return;
-    }
-
-    let active = true;
-    setIsLoadingDetail(true);
-
-    overnightApi
-      .getEventDetail(selectedEventId)
-      .then((detail) => {
-        if (active) {
-          setSelectedEventDetail(detail);
-        }
-      })
-      .catch((error) => {
-        if (active) {
-          console.error('Failed to load overnight event detail:', error);
-          setSelectedEventDetail(null);
-        }
-      })
-      .finally(() => {
-        if (active) {
-          setIsLoadingDetail(false);
-        }
-      });
-
-    return () => {
-      active = false;
-    };
-  }, [selectedEventId]);
 
   const selectedEvent = useMemo<OvernightEventSummary | null>(() => {
     if (!brief || !selectedEventId) return null;
@@ -245,7 +287,27 @@ const OvernightBriefPage: React.FC = () => {
     return brief.primarySources.find((item) => item.eventId === selectedEventId) || null;
   }, [brief, selectedEventId]);
 
-  const detailToRender = selectedEventDetail || selectedEvent;
+  const detailToRender = selectedEvent;
+  const totalHistoryPages = Math.max(1, Math.ceil(historyTotal / historyPageSize));
+
+  const handleHistoryPageChange = (page: number) => {
+    void loadHistory(page);
+  };
+
+  const handleBriefSelect = async (briefId: string) => {
+    if (briefId === brief?.briefId) {
+      return;
+    }
+
+    try {
+      const nextBrief = await overnightApi.getBriefById(briefId);
+      setBrief(nextBrief);
+      setSelectedEventId(nextBrief.topEvents[0]?.eventId || null);
+      setEmptyMessage(null);
+    } catch (error) {
+      setLoadError(error instanceof Error ? error.message : '加载历史晨报失败');
+    }
+  };
 
   if (isLoading) {
     return (
@@ -263,7 +325,7 @@ const OvernightBriefPage: React.FC = () => {
           body={loadError}
           actionLabel="重新加载"
           onAction={() => {
-            void loadBrief();
+            void loadLatestBrief();
           }}
         />
       </div>
@@ -281,7 +343,7 @@ const OvernightBriefPage: React.FC = () => {
           }
           actionLabel="再次检查"
           onAction={() => {
-            void loadBrief();
+            void loadLatestBrief();
           }}
         />
       </div>
@@ -354,8 +416,6 @@ const OvernightBriefPage: React.FC = () => {
                     </div>
                   </div>
                 </div>
-              ) : isLoadingDetail ? (
-                <div className="mt-4 text-sm text-secondary">正在加载事件详情...</div>
               ) : (
                 <div className="mt-4 text-sm text-secondary">选择左侧事件后可查看详细拆解。</div>
               )}
@@ -432,6 +492,16 @@ const OvernightBriefPage: React.FC = () => {
             emptyText="市场传导卡片仍待后端补充。"
           />
         </div>
+
+        <HistoryPanel
+          items={historyItems}
+          activeBriefId={brief.briefId}
+          isLoading={isHistoryLoading}
+          currentPage={historyPage}
+          totalPages={totalHistoryPages}
+          onSelect={handleBriefSelect}
+          onPageChange={handleHistoryPageChange}
+        />
 
         <WatchlistSection buckets={brief.todayWatchlist} />
       </div>

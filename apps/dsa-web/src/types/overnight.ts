@@ -47,6 +47,21 @@ export interface OvernightBrief {
   versionNo: number;
 }
 
+export interface OvernightBriefHistoryItem {
+  briefId: string;
+  digestDate: string;
+  cutoffTime: string;
+  topline: string;
+  generatedAt: string;
+}
+
+export interface OvernightBriefHistoryResponse {
+  total: number;
+  page: number;
+  limit: number;
+  items: OvernightBriefHistoryItem[];
+}
+
 export interface OvernightApiError {
   error: string;
   message: string;

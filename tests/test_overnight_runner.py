@@ -12,6 +12,7 @@ import pytest
 
 from main import _should_run_overnight_mode
 from src.config import Config
+from src.repositories.overnight_repo import OvernightRepository
 from src.overnight.brief_builder import RankedEvent
 from src.overnight.runner import OvernightRunner
 from src.scheduler import Scheduler
@@ -163,6 +164,25 @@ def test_runner_default_repo_limits_events_to_recent_cutoff_window(db_manager: D
 
     facts = [event["core_fact"] for event in result.morning_brief.top_events]
     assert facts == ["Fresh overnight trade shock."]
+
+
+def test_runner_persists_generated_brief_to_repository(db_manager: DatabaseManager) -> None:
+    repo = FakeRepo.with_ranked_event()
+    notifier = FakeNotifier()
+    storage_repo = OvernightRepository(db_manager)
+
+    runner = OvernightRunner(
+        repo=repo,
+        notifier=notifier,
+        storage_repo=storage_repo,
+    )
+    result = runner.run_digest(cutoff_time="07:30", send_notification=False)
+
+    stored = storage_repo.get_latest_morning_brief()
+
+    assert stored is not None
+    assert stored.brief_id == result.morning_brief.brief_id
+    assert stored.top_events[0]["event_id"] == "evt-001"
 
 
 def test_scheduler_registers_overnight_digest_job() -> None:

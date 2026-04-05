@@ -502,6 +502,21 @@ class OvernightMarketSnapshot(Base):
     created_at = Column(DateTime, default=datetime.now, index=True)
 
 
+class OvernightBriefArtifact(Base):
+    """Persisted morning brief payloads for history and replay."""
+
+    __tablename__ = "overnight_brief_artifacts"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    brief_id = Column(String(100), nullable=False, unique=True, index=True)
+    digest_date = Column(String(32), nullable=False, index=True)
+    cutoff_time = Column(String(16), nullable=False)
+    topline = Column(Text, nullable=False)
+    generated_at = Column(String(64), nullable=False, index=True)
+    payload_json = Column(Text, nullable=False)
+    created_at = Column(DateTime, default=datetime.now, index=True)
+
+
 class DatabaseManager:
     """
     数据库管理器 - 单例模式
@@ -624,6 +639,7 @@ class DatabaseManager:
                 "overnight_document_families",
                 "overnight_document_versions",
                 "overnight_market_snapshots",
+                "overnight_brief_artifacts",
             ):
                 if table_name in table_names:
                     continue
