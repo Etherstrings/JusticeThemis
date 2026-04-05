@@ -6,6 +6,7 @@ import SettingsPage from './pages/SettingsPage';
 import LoginPage from './pages/LoginPage';
 import NotFoundPage from './pages/NotFoundPage';
 import ChatPage from './pages/ChatPage';
+import OvernightBriefPage from './pages/OvernightBriefPage';
 import { AuthProvider, useAuth } from './contexts/AuthContext';
 import './App.css';
 
@@ -39,6 +40,17 @@ const ChatIcon: React.FC<{ active?: boolean }> = ({active}) => (
     </svg>
 );
 
+const OvernightIcon: React.FC<{ active?: boolean }> = ({active}) => (
+    <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <path
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            strokeWidth={active ? 2 : 1.5}
+            d="M21 12.8A9 9 0 1111.2 3a7 7 0 109.8 9.8z"
+        />
+    </svg>
+);
+
 const LogoutIcon: React.FC = () => (
     <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5}
@@ -65,6 +77,12 @@ const NAV_ITEMS: DockItem[] = [
         label: '问股',
         to: '/chat',
         icon: ChatIcon,
+    },
+    {
+        key: 'overnight',
+        label: '隔夜',
+        to: '/overnight',
+        icon: OvernightIcon,
     },
     {
         key: 'backtest',
@@ -175,6 +193,7 @@ const AppContent: React.FC = () => {
                 <Routes>
                     <Route path="/" element={<HomePage/>}/>
                     <Route path="/chat" element={<ChatPage/>}/>
+                    <Route path="/overnight" element={<OvernightBriefPage/>}/>
                     <Route path="/backtest" element={<BacktestPage/>}/>
                     <Route path="/settings" element={<SettingsPage/>}/>
                     <Route path="/login" element={<LoginPage/>}/>

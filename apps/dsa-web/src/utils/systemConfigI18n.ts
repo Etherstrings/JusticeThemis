@@ -54,6 +54,10 @@ const fieldTitleMap: Record<string, string> = {
   BACKTEST_MIN_AGE_DAYS: '回测最小历史天数',
   BACKTEST_ENGINE_VERSION: '回测引擎版本',
   BACKTEST_NEUTRAL_BAND_PCT: '回测中性区间阈值（%）',
+  OVERNIGHT_BRIEF_ENABLED: '隔夜晨报',
+  OVERNIGHT_DIGEST_CUTOFF: '晨报截止时间',
+  OVERNIGHT_PRIORITY_ALERT_THRESHOLD: '夜间提醒阈值',
+  OVERNIGHT_SOURCE_WHITELIST: '隔夜源白名单',
 };
 
 const fieldDescriptionMap: Record<string, string> = {
@@ -88,6 +92,10 @@ const fieldDescriptionMap: Record<string, string> = {
   BACKTEST_MIN_AGE_DAYS: '仅回测早于该天数的分析记录。',
   BACKTEST_ENGINE_VERSION: '回测引擎版本标识，用于区分结果版本。',
   BACKTEST_NEUTRAL_BAND_PCT: '中性区间阈值百分比，例如 2 表示 -2%~+2%。',
+  OVERNIGHT_BRIEF_ENABLED: '是否启用面向早晨阅读的隔夜情报摘要。',
+  OVERNIGHT_DIGEST_CUTOFF: '生成隔夜晨报时使用的截止时间，格式为 HH:MM。',
+  OVERNIGHT_PRIORITY_ALERT_THRESHOLD: '夜间即时提醒的优先级阈值，例如 P0 或 P1。',
+  OVERNIGHT_SOURCE_WHITELIST: '仅抓取白名单中的隔夜源，使用逗号分隔 source_id。',
 };
 
 export function getCategoryTitleZh(category: SystemConfigCategory, fallback?: string): string {

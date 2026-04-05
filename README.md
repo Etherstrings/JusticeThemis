@@ -33,6 +33,7 @@
 | AI | 决策仪表盘 | 一句话核心结论 + 精确买卖点位 + 操作检查清单 |
 | 分析 | 多维度分析 | 技术面（盘中实时 MA/多头排列）+ 筹码分布 + 舆情情报 + 实时行情 |
 | 市场 | 全球市场 | 支持 A股、港股、美股及美股指数（SPX、DJI、IXIC 等） |
+| 隔夜情报 | 隔夜晨报 | 聚合海外政策/宏观/媒体事件，输出重点驱动、可能受益方向、可能涨价链条与待确认项 |
 | 复盘 | 大盘复盘 | 每日市场概览、板块涨跌；支持 cn(A股)/us(美股)/both(两者) 切换 |
 | 图片识别 | 从图片添加 | 上传自选股截图，Vision LLM 自动提取股票代码，一键加入监控 |
 | 回测 | AI 回测验证 | 自动评估历史分析准确率，方向胜率、止盈止损命中率 |
@@ -257,6 +258,18 @@ python main.py
 - **自定义策略**：在 `strategies/` 目录下新建 YAML 文件即可添加策略，无需写代码
 
 > **注意**：Agent 模式依赖外部 LLM（Gemini/OpenAI 等），每次对话会产生 API 调用费用。不影响非 Agent 模式（`AGENT_MODE=false` 或未设置）的正常运行。
+
+### 🌙 隔夜晨报
+
+在 `.env` 中启用 `OVERNIGHT_BRIEF_ENABLED=true` 或直接使用命令行 `--overnight-brief`，系统会生成一份面向 A 股早盘阅读的隔夜摘要，并在 Web 端提供 `/overnight` 页面。
+
+- **单次生成**：`python main.py --overnight-brief`
+- **定时模式**：`python main.py --overnight-brief --schedule`
+- **Web 页面**：`/overnight`
+- **API**：`/api/v1/overnight/brief/latest`、`/api/v1/overnight/events/{event_id}`
+- **核心配置**：`OVERNIGHT_DIGEST_CUTOFF`、`OVERNIGHT_PRIORITY_ALERT_THRESHOLD`、`OVERNIGHT_SOURCE_WHITELIST`
+
+> 如果你抓取的是美国政府站点、媒体站点等境外源，后续采集阶段可能需要代理。可优先使用 `HTTP_PROXY`，或参考 `.env.example` 中的 `USE_PROXY`、`PROXY_HOST`、`PROXY_PORT`。如果当前 `/overnight` 页面为空，更常见原因是最近一轮隔夜数据还没成功落库，而不是页面本身有问题。
 
 ### 启动方式
 

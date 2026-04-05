@@ -19,6 +19,13 @@
   - 密码输入框初始设为 readOnly，用户聚焦时解除，阻止浏览器自动填充
 
 ### 新增（#minor）
+- 🌙 **隔夜晨报（overnight intelligence）**
+  - 新增隔夜事件采集/归档/优先级/晨报构建链路，支持输出适合 A 股用户早晨阅读的结构化隔夜摘要
+  - 新增命令行与调度模式：`python main.py --overnight-brief`、`python main.py --overnight-brief --schedule`
+  - 新增通知渲染：Flash Alert 与 Morning Executive Brief
+  - 新增 API：`/api/v1/overnight/brief/latest`、`/api/v1/overnight/events/{event_id}`
+  - 新增 Web UI：`/overnight` 页面，支持查看重点事件、待确认项、观察桶和源链接
+  - 新增配置项：`OVERNIGHT_BRIEF_ENABLED`、`OVERNIGHT_DIGEST_CUTOFF`、`OVERNIGHT_PRIORITY_ALERT_THRESHOLD`、`OVERNIGHT_SOURCE_WHITELIST`
 - 🚀 **桌面端 CI 自动发布到 GitHub Releases**
   - 新增 `.github/workflows/desktop-release.yml`
   - 支持 Windows 安装包（exe）+ 免安装包（zip）与 macOS x64/arm64 DMG 并行构建

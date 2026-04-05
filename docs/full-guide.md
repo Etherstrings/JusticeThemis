@@ -236,6 +236,14 @@ daily_stock_analysis/
 | `TRADING_DAY_CHECK_ENABLED` | 交易日检查：默认 `true`，非交易日跳过执行；设为 `false` 或使用 `--force-run` 可强制执行（Issue #373） | `true` |
 | `SCHEDULE_ENABLED` | 启用定时任务 | `false` |
 | `SCHEDULE_TIME` | 定时执行时间 | `18:00` |
+| `OVERNIGHT_BRIEF_ENABLED` | 启用隔夜晨报模式 | `false` |
+| `OVERNIGHT_DIGEST_CUTOFF` | 隔夜晨报截止时间（HH:MM） | `07:30` |
+| `OVERNIGHT_PRIORITY_ALERT_THRESHOLD` | 夜间即时提醒的最低优先级阈值 | `P0` |
+| `OVERNIGHT_SOURCE_WHITELIST` | 仅抓取指定 `source_id` 的白名单（逗号分隔） | - |
+| `HTTP_PROXY` | 境外站点抓取使用的 HTTP/HTTPS 代理 | - |
+| `USE_PROXY` | `main.py` 启动时自动注入本地代理（读取 `PROXY_HOST/PROXY_PORT`） | `false` |
+| `PROXY_HOST` | 本地代理主机 | `127.0.0.1` |
+| `PROXY_PORT` | 本地代理端口 | `10809` |
 | `LOG_DIR` | 日志目录 | `./logs` |
 
 ---
@@ -363,6 +371,8 @@ python main.py --stocks 600519,300750 # 指定股票
 python main.py --dry-run              # 仅获取数据，不 AI 分析
 python main.py --no-notify            # 不发送推送
 python main.py --schedule             # 定时任务模式
+python main.py --overnight-brief      # 生成隔夜晨报
+python main.py --overnight-brief --schedule  # 定时生成隔夜晨报
 python main.py --force-run            # 非交易日也强制执行（Issue #373）
 python main.py --debug                # 调试模式（详细日志）
 python main.py --workers 5            # 指定并发数
@@ -404,6 +414,9 @@ python main.py --schedule
 
 # 启动定时模式（启动时不执行，仅等待下次定时触发）
 python main.py --schedule --no-run-immediately
+
+# 隔夜晨报模式（按 OVERNIGHT_DIGEST_CUTOFF 定时执行）
+python main.py --overnight-brief --schedule
 ```
 
 #### 环境变量方式
@@ -622,6 +635,29 @@ OPENAI_MODEL=deepseek-chat
 > ⚠️ 使用 LiteLLM Proxy 时须清空 `GEMINI_API_KEY`、`ANTHROPIC_API_KEY`、`AIHUBMIX_KEY`，
 > 仅保留 `OPENAI_BASE_URL` + `OPENAI_API_KEY` + `OPENAI_MODEL`，否则系统优先走原生 SDK 绕过 Proxy。
 
+### 隔夜晨报（Overnight Brief）
+
+隔夜晨报面向“早上打开就想知道美国那边昨夜发生了什么”的使用场景，核心目标不是堆新闻，而是把海外政策/宏观/媒体事件压缩成适合 A 股开盘前阅读的结构化摘要。
+
+- **CLI 单次运行**：`python main.py --overnight-brief`
+- **CLI 定时运行**：`python main.py --overnight-brief --schedule`
+- **Web 页面**：`/overnight`
+- **API**：
+  - `GET /api/v1/overnight/brief/latest`
+  - `GET /api/v1/overnight/events/{event_id}`
+- **无数据行为**：如果最近窗口内没有形成可读简报，`/api/v1/overnight/brief/latest` 会返回 `404`，而不是误导性的空 `200`
+
+建议至少配置：
+
+| 变量 | 说明 | 建议 |
+|------|------|------|
+| `OVERNIGHT_BRIEF_ENABLED` | 启用隔夜晨报 | `true` |
+| `OVERNIGHT_DIGEST_CUTOFF` | 早晨阅读截止时间 | `07:30` |
+| `OVERNIGHT_PRIORITY_ALERT_THRESHOLD` | 夜间即时提醒阈值 | `P0` 或 `P1` |
+| `OVERNIGHT_SOURCE_WHITELIST` | 仅抓关键源时可填 | 留空或填 mission-critical 源 |
+
+如果你需要抓取美国官网、媒体、日历站点等境外源，代理通常会在**采集阶段**生效，而不是在本地 Web 页面展示阶段生效。优先配置 `HTTP_PROXY`；如果你本机有固定本地代理，也可以启用 `.env.example` 中的 `USE_PROXY=true` 并设置 `PROXY_HOST/PROXY_PORT`。
+
 ### 调试模式
 
 ```bash
@@ -701,6 +737,7 @@ FastAPI 提供 RESTful API 服务，支持配置管理和触发分析。
 - 🚀 **快速分析** - 通过 API 接口触发分析
 - 📊 **实时进度** - 分析任务状态实时更新，支持多任务并行
 - 📈 **回测验证** - 评估历史分析准确率，查询方向胜率与模拟收益
+- 🌙 **隔夜晨报** - 查看最新隔夜简报与事件详情
 - 🔗 **API 文档** - 访问 `/docs` 查看 Swagger UI
 
 ### API 接口
@@ -715,6 +752,8 @@ FastAPI 提供 RESTful API 服务，支持配置管理和触发分析。
 | `/api/v1/backtest/results` | GET | 查询回测结果（分页） |
 | `/api/v1/backtest/performance` | GET | 获取整体回测表现 |
 | `/api/v1/backtest/performance/{code}` | GET | 获取单股回测表现 |
+| `/api/v1/overnight/brief/latest` | GET | 获取最新隔夜晨报 |
+| `/api/v1/overnight/events/{event_id}` | GET | 获取隔夜事件详情 |
 | `/api/v1/stocks/extract-from-image` | POST | 从图片提取股票代码（multipart，超时 60s） |
 | `/api/health` | GET | 健康检查 |
 | `/docs` | GET | API Swagger 文档 |
@@ -744,6 +783,9 @@ curl -X POST http://127.0.0.1:8000/api/v1/backtest/run \
 
 # 查询整体回测表现
 curl http://127.0.0.1:8000/api/v1/backtest/performance
+
+# 查询最新隔夜晨报
+curl http://127.0.0.1:8000/api/v1/overnight/brief/latest
 
 # 查询单股回测表现
 curl http://127.0.0.1:8000/api/v1/backtest/performance/600519
