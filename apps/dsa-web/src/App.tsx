@@ -7,6 +7,13 @@ import LoginPage from './pages/LoginPage';
 import NotFoundPage from './pages/NotFoundPage';
 import ChatPage from './pages/ChatPage';
 import OvernightBriefPage from './pages/OvernightBriefPage';
+import OvernightHistoryPage from './pages/OvernightHistoryPage';
+import OvernightEventDetailPage from './pages/OvernightEventDetailPage';
+import OvernightChangesPage from './pages/OvernightChangesPage';
+import OvernightOpeningBoardPage from './pages/OvernightOpeningBoardPage';
+import OvernightPlaybookPage from './pages/OvernightPlaybookPage';
+import OvernightTopicPage from './pages/OvernightTopicPage';
+import OvernightReviewQueuePage from './pages/OvernightReviewQueuePage';
 import { AuthProvider, useAuth } from './contexts/AuthContext';
 import './App.css';
 
@@ -194,6 +201,14 @@ const AppContent: React.FC = () => {
                     <Route path="/" element={<HomePage/>}/>
                     <Route path="/chat" element={<ChatPage/>}/>
                     <Route path="/overnight" element={<OvernightBriefPage/>}/>
+                    <Route path="/overnight/briefs/:briefId" element={<OvernightBriefPage/>}/>
+                    <Route path="/overnight/opening" element={<OvernightOpeningBoardPage/>}/>
+                    <Route path="/overnight/playbook" element={<OvernightPlaybookPage/>}/>
+                    <Route path="/overnight/changes" element={<OvernightChangesPage/>}/>
+                    <Route path="/overnight/history" element={<OvernightHistoryPage/>}/>
+                    <Route path="/overnight/review" element={<OvernightReviewQueuePage/>}/>
+                    <Route path="/overnight/events/:eventId" element={<OvernightEventDetailPage/>}/>
+                    <Route path="/overnight/topics/:topicKey" element={<OvernightTopicPage/>}/>
                     <Route path="/backtest" element={<BacktestPage/>}/>
                     <Route path="/settings" element={<SettingsPage/>}/>
                     <Route path="/login" element={<LoginPage/>}/>

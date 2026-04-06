@@ -190,47 +190,164 @@ def _build_policy_radar(events: list[RankedEvent]) -> list[dict[str, object]]:
 
 
 def _build_today_watchlist(events: list[RankedEvent]) -> list[dict[str, object]]:
-    confirmation_items = [
-        event.core_fact
+    confirmation_events = [
+        event
         for event in events
         if event.confidence < 0.7
     ]
-    pricing_items = [
-        event.core_fact
+    pricing_events = [
+        event
         for event in events
         if event.priority_level in {"P0", "P1"}
     ]
-    release_items = [
-        event.core_fact
+    release_events = [
+        event
         for event in events
         if _is_release_watch(event)
     ]
-    observation_items = [
-        event.core_fact
+
+    consumed = {id(event) for event in confirmation_events + pricing_events + release_events}
+    observation_events = [
+        event
         for event in events
-        if event.core_fact not in set(confirmation_items + pricing_items + release_items)
+        if id(event) not in consumed
     ]
-    if not events:
-        observation_items = ["Overnight flow was light; monitor open-driven repricing."]
 
     return [
-        {
-            "title": "待确认",
-            "items": confirmation_items,
-        },
-        {
-            "title": "待定价",
-            "items": pricing_items,
-        },
-        {
-            "title": "待发布",
-            "items": release_items,
-        },
-        {
-            "title": "待观察",
-            "items": observation_items,
-        },
+        _render_watch_bucket(
+            bucket_key="needs-confirmation",
+            title="待确认",
+            summary="先确认事实和执行细节，再决定是否升级判断。",
+            items=[
+                _render_watch_item(
+                    event,
+                    bucket_key="needs-confirmation",
+                    label="确认原文与细则",
+                    trigger=_coalesce_watch_text(
+                        event.summary,
+                        "等待更多一手原文、细则或正式执行安排。",
+                    ),
+                    action="补原文、补细则、补执行时间。确认前不把它当确定结论。",
+                )
+                for event in confirmation_events
+            ],
+        ),
+        _render_watch_bucket(
+            bucket_key="awaiting-pricing",
+            title="待定价",
+            summary="盯第一定价对象，确认是否沿传导链继续扩散。",
+            items=[
+                _render_watch_item(
+                    event,
+                    bucket_key="awaiting-pricing",
+                    label="观察定价扩散",
+                    trigger=_coalesce_watch_text(
+                        event.market_reaction,
+                        "关注 Asia / Europe open 的第一波定价对象。",
+                    ),
+                    action="盯受益方向、承压方向和跨资产跟随，确认是不是单点波动。",
+                )
+                for event in pricing_events
+            ],
+        ),
+        _render_watch_bucket(
+            bucket_key="scheduled-release",
+            title="待发布",
+            summary="正式发布时间前，预期不能替代结果。",
+            items=[
+                _render_watch_item(
+                    event,
+                    bucket_key="scheduled-release",
+                    label="等待正式发布",
+                    trigger="发布窗口临近，等待正式数据或声明落地。",
+                    action="结果落地前不提前下结论，防止把预期错当事实。",
+                )
+                for event in release_events
+            ],
+        ),
+        _render_watch_bucket(
+            bucket_key="monitoring",
+            title="待观察",
+            summary="跟踪二次发酵，避免把普通噪音误升级。",
+            items=[
+                _render_watch_item(
+                    event,
+                    bucket_key="monitoring",
+                    label="跟踪二次发酵",
+                    trigger=_coalesce_watch_text(
+                        event.why_it_matters,
+                        "观察它是否升级成更高优先级事件。",
+                    ),
+                    action="如果没有二次确认或市场跟随，不主动上调优先级。",
+                )
+                for event in observation_events
+            ]
+            or [
+                {
+                    "watch_id": "monitoring:light-flow",
+                    "bucket_key": "monitoring",
+                    "label": "轻流量环境观察",
+                    "event_id": None,
+                    "core_fact": "Overnight flow was light; monitor open-driven repricing.",
+                    "priority_level": "",
+                    "confidence": 0.0,
+                    "trigger": "开盘后若无新增催化，观察是否只是情绪性重定价。",
+                    "action": "没有新证据前，不把轻流量波动误判成主线。",
+                    "market_reaction": "",
+                }
+            ],
+        ),
     ]
+
+
+def _render_watch_bucket(
+    *,
+    bucket_key: str,
+    title: str,
+    summary: str,
+    items: list[dict[str, object]],
+) -> dict[str, object]:
+    return {
+        "bucket_key": bucket_key,
+        "title": title,
+        "summary": summary,
+        "items": items,
+    }
+
+
+def _render_watch_item(
+    event: RankedEvent,
+    *,
+    bucket_key: str,
+    label: str,
+    trigger: str,
+    action: str,
+) -> dict[str, object]:
+    return {
+        "watch_id": f"{bucket_key}:{_slugify_watch_value(event.event_id or event.core_fact)}",
+        "bucket_key": bucket_key,
+        "label": label,
+        "event_id": event.event_id,
+        "core_fact": event.core_fact,
+        "priority_level": event.priority_level,
+        "confidence": event.confidence,
+        "trigger": trigger,
+        "action": action,
+        "market_reaction": event.market_reaction,
+    }
+
+
+def _coalesce_watch_text(*values: str) -> str:
+    for value in values:
+        cleaned = str(value).strip()
+        if cleaned:
+            return cleaned
+    return ""
+
+
+def _slugify_watch_value(value: str) -> str:
+    slug = "".join(ch.lower() if ch.isalnum() else "-" for ch in value)
+    return slug.strip("-") or "watch-item"
 
 
 def _build_primary_sources(events: list[RankedEvent]) -> list[dict[str, object]]:

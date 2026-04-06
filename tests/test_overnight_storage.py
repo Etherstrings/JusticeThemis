@@ -66,6 +66,19 @@ class OvernightStorageTestCase(unittest.TestCase):
             schedule_field["validation"].get("pattern"),
         )
 
+    def test_database_manager_get_instance_recovers_uninitialized_singleton(self) -> None:
+        DatabaseManager.reset_instance()
+        broken_instance = DatabaseManager.__new__(DatabaseManager)
+
+        self.assertIs(DatabaseManager._instance, broken_instance)
+        self.assertFalse(getattr(broken_instance, "_initialized", False))
+
+        recovered = DatabaseManager.get_instance()
+
+        self.assertTrue(getattr(recovered, "_initialized", False))
+        with recovered.get_session() as session:
+            self.assertEqual(session.execute(text("SELECT 1")).scalar_one(), 1)
+
     def test_overnight_repository_round_trip(self) -> None:
         from src.repositories.overnight_repo import OvernightRepository
 
@@ -199,6 +212,96 @@ class OvernightStorageTestCase(unittest.TestCase):
             ).scalar_one()
 
         self.assertEqual(brief_count, 1)
+
+    def test_overnight_repository_persists_feedback_queue_items(self) -> None:
+        from src.repositories.overnight_repo import OvernightRepository
+
+        repo = OvernightRepository(self.db)
+        feedback_id = repo.save_feedback(
+            target_type="event",
+            target_id="event_123",
+            brief_id="brief_abc",
+            event_id="event_123",
+            feedback_type="priority_too_high",
+            comment="This event felt less important than the overnight headline.",
+        )
+
+        self.assertGreater(feedback_id, 0)
+
+        feedback_items = repo.list_feedback(page=1, limit=10)
+        self.assertEqual(feedback_items["total"], 1)
+        self.assertEqual(feedback_items["items"][0]["target_type"], "event")
+        self.assertEqual(feedback_items["items"][0]["feedback_type"], "priority_too_high")
+        self.assertEqual(feedback_items["items"][0]["status"], "pending_review")
+
+        with self.db.get_session() as session:
+            feedback_count = session.execute(
+                text("SELECT COUNT(1) FROM overnight_feedback_artifacts")
+            ).scalar_one()
+
+        self.assertEqual(feedback_count, 1)
+
+    def test_overnight_repository_filters_feedback_queue_items(self) -> None:
+        from src.repositories.overnight_repo import OvernightRepository
+
+        repo = OvernightRepository(self.db)
+        repo.save_feedback(
+            target_type="event",
+            target_id="event_123",
+            brief_id="brief_abc",
+            event_id="event_123",
+            feedback_type="priority_too_high",
+            comment="This event felt less important than the overnight headline.",
+        )
+        repo.save_feedback(
+            target_type="brief",
+            target_id="brief_abc",
+            brief_id="brief_abc",
+            event_id=None,
+            feedback_type="useful",
+            comment="This brief was useful.",
+            status="reviewed",
+        )
+
+        pending_event_items = repo.list_feedback(
+            page=1,
+            limit=10,
+            target_type="event",
+            status="pending_review",
+        )
+        reviewed_brief_items = repo.list_feedback(
+            page=1,
+            limit=10,
+            target_type="brief",
+            status="reviewed",
+        )
+
+        self.assertEqual(pending_event_items["total"], 1)
+        self.assertEqual(pending_event_items["items"][0]["target_type"], "event")
+        self.assertEqual(pending_event_items["items"][0]["status"], "pending_review")
+        self.assertEqual(reviewed_brief_items["total"], 1)
+        self.assertEqual(reviewed_brief_items["items"][0]["target_type"], "brief")
+        self.assertEqual(reviewed_brief_items["items"][0]["status"], "reviewed")
+
+    def test_overnight_repository_updates_feedback_status(self) -> None:
+        from src.repositories.overnight_repo import OvernightRepository
+
+        repo = OvernightRepository(self.db)
+        feedback_id = repo.save_feedback(
+            target_type="event",
+            target_id="event_123",
+            brief_id="brief_abc",
+            event_id="event_123",
+            feedback_type="priority_too_high",
+            comment="This event felt less important than the overnight headline.",
+        )
+
+        updated_item = repo.update_feedback_status(feedback_id, status="reviewed")
+
+        self.assertIsNotNone(updated_item)
+        assert updated_item is not None
+        self.assertEqual(updated_item["feedback_id"], feedback_id)
+        self.assertEqual(updated_item["status"], "reviewed")
 
 
 if __name__ == "__main__":

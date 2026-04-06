@@ -122,7 +122,24 @@ def test_morning_brief_builds_all_watchlist_buckets() -> None:
         price_pressure_board=[],
     )
 
+    assert [bucket["bucket_key"] for bucket in brief.today_watchlist] == [
+        "needs-confirmation",
+        "awaiting-pricing",
+        "scheduled-release",
+        "monitoring",
+    ]
     assert [bucket["title"] for bucket in brief.today_watchlist] == ["待确认", "待定价", "待发布", "待观察"]
+
+    confirmation_item = brief.today_watchlist[0]["items"][0]
+    assert confirmation_item["event_id"] == "evt-001"
+    assert confirmation_item["priority_level"] == "P0"
+    assert confirmation_item["confidence"] == 0.61
+    assert confirmation_item["trigger"]
+    assert confirmation_item["action"]
+
+    release_item = brief.today_watchlist[2]["items"][0]
+    assert release_item["core_fact"] == "BLS CPI release is due later today"
+    assert release_item["event_id"] == "evt-001"
 
 
 def test_morning_brief_sorts_top_events_by_priority() -> None:

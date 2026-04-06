@@ -6,6 +6,10 @@ interface OvernightEventCardProps {
   event: OvernightEventSummary;
   selected?: boolean;
   onSelect?: (eventId: string) => void;
+  evidenceLabel?: string;
+  evidenceVariant?: 'success' | 'warning' | 'info' | 'default';
+  ashareLead?: string;
+  deltaLabel?: string | null;
 }
 
 function priorityVariant(priorityLevel: string): 'danger' | 'warning' | 'info' | 'default' {
@@ -25,6 +29,10 @@ export const OvernightEventCard: React.FC<OvernightEventCardProps> = ({
   event,
   selected = false,
   onSelect,
+  evidenceLabel,
+  evidenceVariant = 'default',
+  ashareLead,
+  deltaLabel,
 }) => {
   const confidence = `${Math.round((event.confidence || 0) * 100)}%`;
 
@@ -45,6 +53,12 @@ export const OvernightEventCard: React.FC<OvernightEventCardProps> = ({
             <Badge variant={priorityVariant(event.priorityLevel)} glow={event.priorityLevel === 'P0'}>
               {event.priorityLevel || 'NA'}
             </Badge>
+            {evidenceLabel ? (
+              <Badge variant={evidenceVariant}>{evidenceLabel}</Badge>
+            ) : null}
+            {deltaLabel ? (
+              <Badge variant="default">{deltaLabel}</Badge>
+            ) : null}
             <span className="text-xs uppercase tracking-[0.2em] text-muted">Confidence {confidence}</span>
           </div>
           <span className="text-xs font-mono text-secondary">{event.eventId}</span>
@@ -63,6 +77,13 @@ export const OvernightEventCard: React.FC<OvernightEventCardProps> = ({
             {event.whyItMatters || '当前事件影响链条仍需结合开盘后价格反馈进一步判断。'}
           </p>
         </div>
+
+        {ashareLead ? (
+          <div className="mt-4 rounded-2xl border border-cyan/10 bg-cyan/5 px-3 py-3">
+            <div className="text-xs uppercase tracking-[0.18em] text-cyan/70">A股映射</div>
+            <p className="mt-2 text-sm leading-6 text-secondary">{ashareLead}</p>
+          </div>
+        ) : null}
       </Card>
     </button>
   );

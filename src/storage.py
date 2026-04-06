@@ -17,6 +17,7 @@ import hashlib
 import json
 import logging
 import re
+import threading
 from datetime import datetime, date, timedelta
 from typing import Optional, List, Dict, Any, TYPE_CHECKING, Tuple
 
@@ -517,6 +518,22 @@ class OvernightBriefArtifact(Base):
     created_at = Column(DateTime, default=datetime.now, index=True)
 
 
+class OvernightFeedbackArtifact(Base):
+    """Persisted user feedback queue for overnight briefs and events."""
+
+    __tablename__ = "overnight_feedback_artifacts"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    target_type = Column(String(32), nullable=False, index=True)
+    target_id = Column(String(100), nullable=False, index=True)
+    brief_id = Column(String(100), nullable=True, index=True)
+    event_id = Column(String(100), nullable=True, index=True)
+    feedback_type = Column(String(64), nullable=False, index=True)
+    comment = Column(Text, nullable=False, default="")
+    status = Column(String(32), nullable=False, default="pending_review", index=True)
+    created_at = Column(DateTime, default=datetime.now, index=True)
+
+
 class DatabaseManager:
     """
     数据库管理器 - 单例模式
@@ -529,6 +546,7 @@ class DatabaseManager:
     
     _instance: Optional['DatabaseManager'] = None
     _initialized: bool = False
+    _instance_lock = threading.Lock()
     
     def __new__(cls, *args, **kwargs):
         """单例模式实现"""
@@ -578,18 +596,31 @@ class DatabaseManager:
     @classmethod
     def get_instance(cls) -> 'DatabaseManager':
         """获取单例实例"""
-        if cls._instance is None:
-            cls._instance = cls()
-        return cls._instance
+        with cls._instance_lock:
+            if cls._instance is None:
+                cls._instance = cls()
+            elif not cls._is_ready(cls._instance):
+                cls._instance._initialized = False
+                cls._instance = cls()
+            return cls._instance
+
+    @staticmethod
+    def _is_ready(instance: 'DatabaseManager') -> bool:
+        return (
+            getattr(instance, '_initialized', False)
+            and hasattr(instance, '_SessionLocal')
+            and hasattr(instance, '_engine')
+        )
     
     @classmethod
     def reset_instance(cls) -> None:
         """重置单例（用于测试）"""
-        if cls._instance is not None:
-            if hasattr(cls._instance, '_engine') and cls._instance._engine is not None:
-                cls._instance._engine.dispose()
-            cls._instance._initialized = False
-            cls._instance = None
+        with cls._instance_lock:
+            if cls._instance is not None:
+                if hasattr(cls._instance, '_engine') and cls._instance._engine is not None:
+                    cls._instance._engine.dispose()
+                cls._instance._initialized = False
+                cls._instance = None
 
     @classmethod
     def _cleanup_engine(cls, engine) -> None:
@@ -640,6 +671,7 @@ class DatabaseManager:
                 "overnight_document_versions",
                 "overnight_market_snapshots",
                 "overnight_brief_artifacts",
+                "overnight_feedback_artifacts",
             ):
                 if table_name in table_names:
                     continue

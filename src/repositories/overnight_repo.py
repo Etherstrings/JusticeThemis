@@ -20,6 +20,7 @@ from src.storage import (
     OvernightDocumentFamily,
     OvernightDocumentVersion,
     OvernightEventCluster,
+    OvernightFeedbackArtifact,
     OvernightMarketSnapshot,
     OvernightRawRecord,
     OvernightSourceItem,
@@ -295,6 +296,22 @@ class OvernightRepository:
                 return None
             return self._to_morning_brief(row)
 
+    def get_previous_morning_brief(self, brief_id: str) -> MorningExecutiveBrief | None:
+        with self.db.get_session() as session:
+            rows = session.execute(
+                select(OvernightBriefArtifact)
+                .order_by(OvernightBriefArtifact.generated_at.desc(), OvernightBriefArtifact.id.desc())
+            ).scalars().all()
+
+        for index, row in enumerate(rows):
+            if row.brief_id != brief_id:
+                continue
+            if index + 1 >= len(rows):
+                return None
+            return self._to_morning_brief(rows[index + 1])
+
+        return None
+
     def list_morning_briefs(self, *, page: int, limit: int) -> dict[str, object]:
         offset = max(page - 1, 0) * limit
 
@@ -324,6 +341,108 @@ class OvernightRepository:
                 for row in rows
             ],
         }
+
+    def save_feedback(
+        self,
+        *,
+        target_type: str,
+        target_id: str,
+        brief_id: str | None,
+        event_id: str | None,
+        feedback_type: str,
+        comment: str,
+        status: str = "pending_review",
+    ) -> int:
+        with self.db.get_session() as session:
+            row = OvernightFeedbackArtifact(
+                target_type=target_type,
+                target_id=target_id,
+                brief_id=brief_id,
+                event_id=event_id,
+                feedback_type=feedback_type,
+                comment=comment,
+                status=status,
+            )
+            session.add(row)
+            session.commit()
+            session.refresh(row)
+            return int(row.id)
+
+    def list_feedback(
+        self,
+        *,
+        page: int,
+        limit: int,
+        target_type: str | None = None,
+        status: str | None = None,
+    ) -> dict[str, object]:
+        offset = max(page - 1, 0) * limit
+
+        with self.db.get_session() as session:
+            count_query = select(func.count()).select_from(OvernightFeedbackArtifact)
+            items_query = select(OvernightFeedbackArtifact)
+
+            if target_type:
+                count_query = count_query.where(OvernightFeedbackArtifact.target_type == target_type)
+                items_query = items_query.where(OvernightFeedbackArtifact.target_type == target_type)
+            if status:
+                count_query = count_query.where(OvernightFeedbackArtifact.status == status)
+                items_query = items_query.where(OvernightFeedbackArtifact.status == status)
+
+            total = session.execute(count_query).scalar_one()
+            rows = session.execute(
+                items_query
+                .order_by(OvernightFeedbackArtifact.created_at.desc(), OvernightFeedbackArtifact.id.desc())
+                .offset(offset)
+                .limit(limit)
+            ).scalars().all()
+
+        return {
+            "page": page,
+            "limit": limit,
+            "total": int(total),
+            "items": [
+                {
+                    "feedback_id": int(row.id),
+                    "target_type": row.target_type,
+                    "target_id": row.target_id,
+                    "brief_id": row.brief_id,
+                    "event_id": row.event_id,
+                    "feedback_type": row.feedback_type,
+                    "comment": row.comment,
+                    "status": row.status,
+                    "created_at": row.created_at.isoformat(timespec="seconds") if row.created_at else None,
+                }
+                for row in rows
+            ],
+        }
+
+    def update_feedback_status(self, feedback_id: int, *, status: str) -> dict[str, object] | None:
+        with self.db.get_session() as session:
+            row = session.execute(
+                select(OvernightFeedbackArtifact)
+                .where(OvernightFeedbackArtifact.id == feedback_id)
+                .limit(1)
+            ).scalar_one_or_none()
+
+            if row is None:
+                return None
+
+            row.status = status
+            session.commit()
+            session.refresh(row)
+
+            return {
+                "feedback_id": int(row.id),
+                "target_type": row.target_type,
+                "target_id": row.target_id,
+                "brief_id": row.brief_id,
+                "event_id": row.event_id,
+                "feedback_type": row.feedback_type,
+                "comment": row.comment,
+                "status": row.status,
+                "created_at": row.created_at.isoformat(timespec="seconds") if row.created_at else None,
+            }
 
     def _to_stored_item(
         self,
