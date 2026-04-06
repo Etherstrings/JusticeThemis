@@ -2,7 +2,7 @@ import type React from 'react';
 import { useEffect, useMemo, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import { overnightApi, OvernightBriefUnavailableError } from '../api/overnight';
-import { Badge, Card, Pagination } from '../components/common';
+import { Badge, Button, Card, Pagination } from '../components/common';
 import { OvernightActionDesk } from '../components/overnight/OvernightActionDesk';
 import { OvernightEventCard } from '../components/overnight/OvernightEventCard';
 import { OvernightFeedbackPanel } from '../components/overnight/OvernightFeedbackPanel';
@@ -12,6 +12,7 @@ import type {
   OvernightBoardItem,
   OvernightBrief,
   OvernightBriefHistoryItem,
+  OvernightCapturedSourceItem,
   OvernightEventDetail,
   OvernightEventSummary,
   OvernightHealthResponse,
@@ -324,6 +325,19 @@ const SourceCatalogPanel: React.FC<{
   </Card>
 );
 
+function renderCapturedSourceTierBadge(coverageTier?: string): React.ReactNode {
+  if (coverageTier === 'official_policy') {
+    return <Badge variant="danger">官方政策</Badge>;
+  }
+  if (coverageTier === 'official_data') {
+    return <Badge variant="danger">官方数据</Badge>;
+  }
+  if (coverageTier === 'editorial_media') {
+    return <Badge variant="info">主流媒体</Badge>;
+  }
+  return null;
+}
+
 const HealthPanel: React.FC<{
   health: OvernightHealthResponse | null;
   isLoading: boolean;
@@ -455,6 +469,82 @@ const HealthPanel: React.FC<{
   </Card>
 );
 
+const CapturedSourceFeedPanel: React.FC<{
+  items: OvernightCapturedSourceItem[];
+  isLoading: boolean;
+  isRefreshing: boolean;
+  error: string | null;
+  refreshSummary: string | null;
+  onRefresh: () => void;
+}> = ({ items, isLoading, isRefreshing, error, refreshSummary, onRefresh }) => (
+  <Card variant="bordered" padding="md">
+    <div className="flex flex-wrap items-center justify-between gap-3">
+      <div>
+        <div className="text-xs uppercase tracking-[0.2em] text-muted">Captured Source Feed</div>
+        <h3 className="mt-1 text-lg font-semibold text-white">最近抓到的新闻源</h3>
+      </div>
+      <div className="flex items-center gap-3">
+        <Button variant="outline" size="sm" isLoading={isRefreshing} onClick={onRefresh}>
+          立即刷新
+        </Button>
+        <Badge variant="default">{items.length}</Badge>
+      </div>
+    </div>
+
+    {refreshSummary ? (
+      <div className="mt-4 rounded-2xl border border-cyan/10 bg-cyan/5 px-4 py-3 text-sm text-cyan/90">
+        {refreshSummary}
+      </div>
+    ) : null}
+
+    {isLoading ? (
+      <div className="mt-4 text-sm text-secondary">正在加载最近抓取到的源内容...</div>
+    ) : error ? (
+      <div className="mt-4 text-sm text-red-300">{error}</div>
+    ) : items.length === 0 ? (
+      <div className="mt-4 rounded-2xl border border-white/6 bg-white/[0.02] px-4 py-4 text-sm text-secondary">
+        当前还没有可展示的已抓取源条目，可以直接手动刷新试一次。
+      </div>
+    ) : (
+      <div className="mt-4 grid gap-3 xl:grid-cols-2">
+        {items.map((item) => (
+          <a
+            key={item.itemId}
+            href={item.canonicalUrl}
+            target="_blank"
+            rel="noreferrer"
+            className="block rounded-2xl border border-white/6 bg-white/[0.02] px-4 py-3 transition hover:border-cyan/30 hover:bg-cyan/6"
+          >
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <div className="text-sm font-medium text-white">{item.title || item.sourceName}</div>
+                <div className="mt-2 text-sm text-secondary">来源: {item.sourceName}</div>
+              </div>
+              <div className="flex flex-wrap items-center justify-end gap-2">
+                {renderCapturedSourceTierBadge(item.coverageTier)}
+                {item.sourceClass ? <Badge variant="default">{item.sourceClass}</Badge> : null}
+              </div>
+            </div>
+
+            {item.summary ? (
+              <div className="mt-3 text-sm leading-6 text-secondary">{item.summary}</div>
+            ) : (
+              <div className="mt-3 text-sm leading-6 text-secondary">这条源暂时只有标题，摘要还未抽取完成。</div>
+            )}
+
+            <div className="mt-3 flex flex-wrap gap-3 text-xs text-muted">
+              <span>{formatOvernightDateTime(item.createdAt)}</span>
+              {item.documentType ? <span>{item.documentType}</span> : null}
+              {item.sourceId ? <span>{item.sourceId}</span> : null}
+            </div>
+            <div className="mt-3 truncate text-sm text-cyan">{item.canonicalUrl}</div>
+          </a>
+        ))}
+      </div>
+    )}
+  </Card>
+);
+
 const OvernightBriefPage: React.FC = () => {
   const { briefId } = useParams();
   const navigate = useNavigate();
@@ -473,6 +563,11 @@ const OvernightBriefPage: React.FC = () => {
   const [selectedEventDetail, setSelectedEventDetail] = useState<OvernightEventDetail | null>(null);
   const [isOperationsLoading, setIsOperationsLoading] = useState(true);
   const [operationsError, setOperationsError] = useState<string | null>(null);
+  const [recentSourceItems, setRecentSourceItems] = useState<OvernightCapturedSourceItem[]>([]);
+  const [isSourceFeedLoading, setIsSourceFeedLoading] = useState(true);
+  const [isSourceFeedRefreshing, setIsSourceFeedRefreshing] = useState(false);
+  const [sourceFeedError, setSourceFeedError] = useState<string | null>(null);
+  const [sourceFeedRefreshSummary, setSourceFeedRefreshSummary] = useState<string | null>(null);
 
   const loadHistory = async (page = 1) => {
     setIsHistoryLoading(true);
@@ -535,14 +630,51 @@ const OvernightBriefPage: React.FC = () => {
     }
   };
 
+  const loadRecentSourceItems = async () => {
+    setIsSourceFeedLoading(true);
+    setSourceFeedError(null);
+    setSourceFeedRefreshSummary(null);
+
+    try {
+      const response = await overnightApi.getRecentSourceItems(12);
+      setRecentSourceItems(response.items);
+    } catch (error) {
+      setSourceFeedError(error instanceof Error ? error.message : '加载最近抓取源失败');
+    } finally {
+      setIsSourceFeedLoading(false);
+    }
+  };
+
+  const handleSourceFeedRefresh = async () => {
+    setIsSourceFeedRefreshing(true);
+    setSourceFeedError(null);
+    setSourceFeedRefreshSummary(null);
+
+    try {
+      const response = await overnightApi.refreshSourceItems(2, 6, 12);
+      setRecentSourceItems(response.items);
+      setSourceFeedRefreshSummary(
+        `本次刷新访问了 ${response.collectedSources} 个源，抓到 ${response.collectedItems} 条内容，下面展示最近 ${response.total} 条。`
+      );
+      void loadOperations();
+    } catch (error) {
+      setSourceFeedError(error instanceof Error ? error.message : '刷新抓取源失败');
+    } finally {
+      setIsSourceFeedRefreshing(false);
+      setIsSourceFeedLoading(false);
+    }
+  };
+
   const refreshPage = () => {
     void loadBrief();
     void loadOperations();
+    void loadRecentSourceItems();
   };
 
   useEffect(() => {
     void loadBrief();
     void loadOperations();
+    void loadRecentSourceItems();
   }, [briefId]);
 
   useEffect(() => {
@@ -648,6 +780,14 @@ const OvernightBriefPage: React.FC = () => {
           <SourceCatalogPanel sources={sources} isLoading={isOperationsLoading} error={operationsError} />
           <HealthPanel health={health} isLoading={isOperationsLoading} error={operationsError} />
         </div>
+        <CapturedSourceFeedPanel
+          items={recentSourceItems}
+          isLoading={isSourceFeedLoading}
+          isRefreshing={isSourceFeedRefreshing}
+          error={sourceFeedError}
+          refreshSummary={sourceFeedRefreshSummary}
+          onRefresh={() => void handleSourceFeedRefresh()}
+        />
         </div>
       </div>
     );
@@ -671,6 +811,14 @@ const OvernightBriefPage: React.FC = () => {
           <SourceCatalogPanel sources={sources} isLoading={isOperationsLoading} error={operationsError} />
           <HealthPanel health={health} isLoading={isOperationsLoading} error={operationsError} />
         </div>
+        <CapturedSourceFeedPanel
+          items={recentSourceItems}
+          isLoading={isSourceFeedLoading}
+          isRefreshing={isSourceFeedRefreshing}
+          error={sourceFeedError}
+          refreshSummary={sourceFeedRefreshSummary}
+          onRefresh={() => void handleSourceFeedRefresh()}
+        />
         </div>
       </div>
     );
@@ -916,6 +1064,15 @@ const OvernightBriefPage: React.FC = () => {
           <SourceCatalogPanel sources={sources} isLoading={isOperationsLoading} error={operationsError} />
           <HealthPanel health={health} isLoading={isOperationsLoading} error={operationsError} />
         </div>
+
+        <CapturedSourceFeedPanel
+          items={recentSourceItems}
+          isLoading={isSourceFeedLoading}
+          isRefreshing={isSourceFeedRefreshing}
+          error={sourceFeedError}
+          refreshSummary={sourceFeedRefreshSummary}
+          onRefresh={() => void handleSourceFeedRefresh()}
+        />
 
         <WatchlistSection buckets={brief.todayWatchlist} briefId={brief.briefId} />
       </div>

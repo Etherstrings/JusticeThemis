@@ -368,6 +368,46 @@ class FakeOvernightService:
             },
         }
 
+    def list_recent_source_items(self, *, limit: int = 20):
+        return {
+            "total": 1,
+            "items": [
+                {
+                    "item_id": 11,
+                    "source_id": "whitehouse_news",
+                    "source_name": "White House News",
+                    "canonical_url": "https://www.whitehouse.gov/briefing-room/statements-releases/2026/04/04/sample-release/",
+                    "title": "Statement from the White House",
+                    "summary": "The White House announced a fresh policy move relevant to trade and supply chains.",
+                    "document_type": "news_article",
+                    "source_class": "policy",
+                    "coverage_tier": "official_policy",
+                    "created_at": "2026-04-05T07:20:00",
+                }
+            ],
+        }
+
+    def refresh_source_items(self, *, limit_per_source: int = 2, max_sources: int = 6, recent_limit: int = 12):
+        return {
+            "collected_sources": 1,
+            "collected_items": 1,
+            "total": 1,
+            "items": [
+                {
+                    "item_id": 12,
+                    "source_id": "whitehouse_news",
+                    "source_name": "White House News",
+                    "canonical_url": "https://www.whitehouse.gov/briefing-room/statements-releases/2026/04/04/sample-release/",
+                    "title": "Statement from the White House",
+                    "summary": "The White House announced a fresh policy move relevant to trade and supply chains.",
+                    "document_type": "news_article",
+                    "source_class": "policy",
+                    "coverage_tier": "official_policy",
+                    "created_at": "2026-04-05T07:21:00",
+                }
+            ],
+        }
+
     def submit_feedback(
         self,
         *,
@@ -569,6 +609,27 @@ def test_get_overnight_sources(client_with_data: TestClient) -> None:
     assert payload["items"][0]["coverage_tier"] == "official_policy"
     assert payload["items"][0]["region_focus"] == "US policy"
     assert payload["items"][0]["coverage_focus"]
+
+
+def test_get_recent_captured_source_items(client_with_data: TestClient) -> None:
+    response = client_with_data.get("/api/v1/overnight/source-items?limit=5")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["total"] == 1
+    assert payload["items"][0]["source_id"] == "whitehouse_news"
+    assert payload["items"][0]["source_name"] == "White House News"
+    assert payload["items"][0]["coverage_tier"] == "official_policy"
+
+
+def test_refresh_captured_source_items(client_with_data: TestClient) -> None:
+    response = client_with_data.post("/api/v1/overnight/source-items/refresh?limit_per_source=1&max_sources=1&recent_limit=5")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["collected_sources"] == 1
+    assert payload["collected_items"] == 1
+    assert payload["items"][0]["title"] == "Statement from the White House"
 
 
 def test_get_overnight_health(client_with_data: TestClient) -> None:

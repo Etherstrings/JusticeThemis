@@ -193,6 +193,29 @@ export interface OvernightSourceListResponse {
   items: OvernightSourceCatalogItem[];
 }
 
+export interface OvernightCapturedSourceItem {
+  itemId: number;
+  sourceId: string;
+  sourceName: string;
+  canonicalUrl: string;
+  title: string;
+  summary: string;
+  documentType: string;
+  sourceClass: string;
+  coverageTier: string;
+  createdAt?: string | null;
+}
+
+export interface OvernightCapturedSourceItemListResponse {
+  total: number;
+  items: OvernightCapturedSourceItem[];
+}
+
+export interface OvernightSourceRefreshResponse extends OvernightCapturedSourceItemListResponse {
+  collectedSources: number;
+  collectedItems: number;
+}
+
 export interface OvernightSourceHealth {
   totalSources: number;
   missionCriticalSources: number;

@@ -23,6 +23,9 @@ from api.v1.schemas.overnight import (
     OvernightFeedbackUpdateRequest,
     OvernightHealthResponse,
     OvernightSourceListResponse,
+    OvernightSourceItemListResponse,
+    OvernightSourceItemResponse,
+    OvernightSourceRefreshResponse,
     OvernightSourceResponse,
     OvernightTopicHistoryItemResponse,
     OvernightTopicHistoryOccurrenceResponse,
@@ -297,6 +300,46 @@ def get_sources(
     return OvernightSourceListResponse(
         total=int(result.get("total", 0)),
         mission_critical=int(result.get("mission_critical", 0)),
+        items=items,
+    )
+
+
+@router.get("/source-items", response_model=OvernightSourceItemListResponse)
+def get_recent_source_items(
+    limit: int = Query(20, ge=1, le=100, description="Number of recent source items to return"),
+    service: OvernightService = Depends(get_overnight_service),
+) -> OvernightSourceItemListResponse:
+    result = service.list_recent_source_items(limit=limit)
+    items = [
+        OvernightSourceItemResponse.model_validate(item)
+        for item in result.get("items", [])
+    ]
+    return OvernightSourceItemListResponse(
+        total=int(result.get("total", 0)),
+        items=items,
+    )
+
+
+@router.post("/source-items/refresh", response_model=OvernightSourceRefreshResponse)
+def refresh_source_items(
+    limit_per_source: int = Query(2, ge=1, le=5, description="Max captured items per source"),
+    max_sources: int = Query(6, ge=1, le=20, description="Max sources to visit in one refresh"),
+    recent_limit: int = Query(12, ge=1, le=100, description="How many recent items to return after refresh"),
+    service: OvernightService = Depends(get_overnight_service),
+) -> OvernightSourceRefreshResponse:
+    result = service.refresh_source_items(
+        limit_per_source=limit_per_source,
+        max_sources=max_sources,
+        recent_limit=recent_limit,
+    )
+    items = [
+        OvernightSourceItemResponse.model_validate(item)
+        for item in result.get("items", [])
+    ]
+    return OvernightSourceRefreshResponse(
+        collected_sources=int(result.get("collected_sources", 0)),
+        collected_items=int(result.get("collected_items", 0)),
+        total=int(result.get("total", 0)),
         items=items,
     )
 

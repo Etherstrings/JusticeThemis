@@ -218,6 +218,35 @@ class OvernightSourceListResponse(BaseModel):
     items: list[OvernightSourceResponse] = Field(default_factory=list, description="Registered overnight sources")
 
 
+class OvernightSourceItemResponse(BaseModel):
+    """Single captured source item."""
+
+    item_id: int = Field(..., description="Stored source item id")
+    source_id: str = Field(..., description="Source registry id")
+    source_name: str = Field(..., description="Source display name")
+    canonical_url: str = Field(..., description="Canonical article URL")
+    title: str = Field("", description="Captured title")
+    summary: str = Field("", description="Captured summary excerpt")
+    document_type: str = Field("", description="Normalized document type")
+    source_class: str = Field("", description="Source class")
+    coverage_tier: str = Field("", description="Coverage tier")
+    created_at: str | None = Field(None, description="Storage timestamp")
+
+
+class OvernightSourceItemListResponse(BaseModel):
+    """List of captured source items."""
+
+    total: int = Field(..., description="Number of returned captured items")
+    items: list[OvernightSourceItemResponse] = Field(default_factory=list, description="Captured source items")
+
+
+class OvernightSourceRefreshResponse(OvernightSourceItemListResponse):
+    """Result of an on-demand source refresh."""
+
+    collected_sources: int = Field(..., description="Number of sources visited during refresh")
+    collected_items: int = Field(..., description="Number of items captured during refresh")
+
+
 class OvernightSourceHealthResponse(BaseModel):
     """Operational health of source coverage."""
 

@@ -16,6 +16,7 @@ from src.overnight.source_registry import build_default_source_registry
 from src.notification import NotificationService
 from src.repositories.overnight_repo import OvernightRepository
 from src.services.overnight_judgment_service import OvernightJudgmentService
+from src.services.overnight_source_capture_service import OvernightSourceCaptureService
 from src.services.overnight_source_excerpt_service import OvernightSourceExcerptService
 
 
@@ -86,11 +87,13 @@ class OvernightService:
         repo: OvernightRepository | None = None,
         judgment_service: OvernightJudgmentService | None = None,
         source_excerpt_service: OvernightSourceExcerptService | None = None,
+        source_capture_service: OvernightSourceCaptureService | None = None,
     ) -> None:
         self.runner = runner or OvernightRunner()
         self.repo = repo or OvernightRepository()
         self.judgment_service = judgment_service or OvernightJudgmentService()
         self.source_excerpt_service = source_excerpt_service or OvernightSourceExcerptService(repo=self.repo)
+        self.source_capture_service = source_capture_service or OvernightSourceCaptureService(repo=self.repo)
 
     def get_latest_brief(self) -> MorningExecutiveBrief:
         latest = self.repo.get_latest_morning_brief()
@@ -483,6 +486,22 @@ class OvernightService:
                 for source in sources
             ],
         }
+
+    def list_recent_source_items(self, *, limit: int = 20) -> dict[str, Any]:
+        return self.source_capture_service.list_recent_items(limit=limit)
+
+    def refresh_source_items(
+        self,
+        *,
+        limit_per_source: int = 2,
+        max_sources: int = 6,
+        recent_limit: int = 12,
+    ) -> dict[str, Any]:
+        return self.source_capture_service.refresh(
+            limit_per_source=limit_per_source,
+            max_sources=max_sources,
+            recent_limit=recent_limit,
+        )
 
     def get_health_summary(self) -> dict[str, Any]:
         sources = build_default_source_registry()

@@ -196,6 +196,32 @@ class OvernightRepository:
             latest_by_url[canonical_url] = self._to_stored_item(row)
         return latest_by_url
 
+    def list_recent_source_items(self, *, limit: int = 20) -> list[dict[str, object]]:
+        with self.db.get_session() as session:
+            rows = session.execute(
+                select(OvernightSourceItem, OvernightRawRecord)
+                .join(OvernightRawRecord, OvernightSourceItem.raw_id == OvernightRawRecord.id)
+                .order_by(OvernightSourceItem.created_at.desc(), OvernightSourceItem.id.desc())
+                .limit(limit)
+            ).all()
+
+        items: list[dict[str, object]] = []
+        for source_item, raw_record in rows:
+            items.append(
+                {
+                    "item_id": int(source_item.id),
+                    "source_id": raw_record.source_id,
+                    "canonical_url": source_item.canonical_url,
+                    "title": source_item.title,
+                    "summary": source_item.summary or "",
+                    "document_type": source_item.document_type,
+                    "created_at": source_item.created_at.isoformat(timespec="seconds")
+                    if source_item.created_at
+                    else None,
+                }
+            )
+        return items
+
     def upsert_event_cluster(self, core_fact: str, event_type: str, event_subtype: str) -> int:
         with self.db.get_session() as session:
             existing = session.execute(

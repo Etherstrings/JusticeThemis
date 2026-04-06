@@ -6,6 +6,7 @@ import type {
   OvernightBrief,
   OvernightBriefDeltaResponse,
   OvernightBriefHistoryResponse,
+  OvernightCapturedSourceItemListResponse,
   OvernightEventHistoryResponse,
   OvernightFeedbackCreateRequest,
   OvernightFeedbackListResponse,
@@ -13,6 +14,7 @@ import type {
   OvernightEventDetail,
   OvernightHealthResponse,
   OvernightSourceListResponse,
+  OvernightSourceRefreshResponse,
   OvernightTopicHistoryResponse,
 } from '../types/overnight';
 
@@ -145,6 +147,28 @@ export const overnightApi = {
   getSources: async (): Promise<OvernightSourceListResponse> => {
     const response = await apiClient.get<Record<string, unknown>>('/api/v1/overnight/sources');
     return toCamelCase<OvernightSourceListResponse>(response.data);
+  },
+
+  getRecentSourceItems: async (limit = 12): Promise<OvernightCapturedSourceItemListResponse> => {
+    const response = await apiClient.get<Record<string, unknown>>('/api/v1/overnight/source-items', {
+      params: { limit },
+    });
+    return toCamelCase<OvernightCapturedSourceItemListResponse>(response.data);
+  },
+
+  refreshSourceItems: async (
+    limitPerSource = 2,
+    maxSources = 6,
+    recentLimit = 12
+  ): Promise<OvernightSourceRefreshResponse> => {
+    const response = await apiClient.post<Record<string, unknown>>('/api/v1/overnight/source-items/refresh', null, {
+      params: {
+        limit_per_source: limitPerSource,
+        max_sources: maxSources,
+        recent_limit: recentLimit,
+      },
+    });
+    return toCamelCase<OvernightSourceRefreshResponse>(response.data);
   },
 
   getHealth: async (): Promise<OvernightHealthResponse> => {
