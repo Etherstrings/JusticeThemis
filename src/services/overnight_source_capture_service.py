@@ -89,6 +89,10 @@ class OvernightSourceCaptureService:
             for source in self.registry
             if not whitelist or source.source_id in whitelist
         ]
+        selected.sort(
+            key=lambda source: (int(source.priority), 1 if source.is_mission_critical else 0, source.source_id),
+            reverse=True,
+        )
         return selected[: max(1, max_sources)]
 
     def _collect_source_candidates(self, source: SourceDefinition) -> list[SourceCandidate]:

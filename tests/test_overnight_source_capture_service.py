@@ -11,6 +11,7 @@ import pytest
 
 from src.config import Config
 from src.overnight.source_registry import build_default_source_registry
+from src.overnight.types import SourceDefinition
 from src.repositories.overnight_repo import OvernightRepository
 from src.services.overnight_source_capture_service import OvernightSourceCaptureService
 from src.storage import DatabaseManager
@@ -83,3 +84,43 @@ def test_source_capture_service_collects_and_lists_recent_items(db_manager: Data
     assert recent_items["total"] == 1
     assert recent_items["items"][0]["canonical_url"].startswith("https://www.whitehouse.gov/briefing-room/")
 
+
+def test_source_capture_service_selects_highest_priority_sources_first(db_manager: DatabaseManager) -> None:
+    repo = OvernightRepository(db_manager)
+    registry = [
+        SourceDefinition(
+            source_id="low_priority",
+            display_name="Low Priority",
+            organization_type="official_policy",
+            source_class="policy",
+            entry_type="rss",
+            entry_urls=("https://example.com/low.xml",),
+            priority=10,
+            poll_interval_seconds=300,
+        ),
+        SourceDefinition(
+            source_id="high_priority",
+            display_name="High Priority",
+            organization_type="official_policy",
+            source_class="policy",
+            entry_type="rss",
+            entry_urls=("https://example.com/high.xml",),
+            priority=100,
+            poll_interval_seconds=300,
+        ),
+        SourceDefinition(
+            source_id="medium_priority",
+            display_name="Medium Priority",
+            organization_type="official_policy",
+            source_class="policy",
+            entry_type="rss",
+            entry_urls=("https://example.com/medium.xml",),
+            priority=60,
+            poll_interval_seconds=300,
+        ),
+    ]
+    service = OvernightSourceCaptureService(repo=repo, registry=registry, http_client=RoutingFixtureClient({}))
+
+    selected = service._select_sources(max_sources=2)
+
+    assert [source.source_id for source in selected] == ["high_priority", "medium_priority"]

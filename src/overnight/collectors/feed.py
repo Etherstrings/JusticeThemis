@@ -5,6 +5,7 @@ from __future__ import annotations
 
 from datetime import datetime
 from email.utils import parsedate_to_datetime
+from urllib.parse import urljoin
 
 import feedparser
 
@@ -63,7 +64,7 @@ class FeedCollector:
             candidates.append(
                 SourceCandidate(
                     candidate_type="feed_item",
-                    candidate_url=link,
+                    candidate_url=urljoin(source.entry_urls[0], link),
                     candidate_title=title,
                     candidate_summary=summary,
                     candidate_published_at=published_at,

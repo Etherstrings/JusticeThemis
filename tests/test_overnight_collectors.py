@@ -25,6 +25,14 @@ class FixtureClient:
         return self.fixture_path.read_text(encoding="utf-8")
 
 
+class InlineFixtureClient:
+    def __init__(self, html: str):
+        self.html = html
+
+    def fetch(self, _url: str) -> str:
+        return self.html
+
+
 def _source_by_id(source_id: str) -> SourceDefinition:
     return next(source for source in build_default_source_registry() if source.source_id == source_id)
 
@@ -44,6 +52,28 @@ def test_feed_collector_parses_fed_items() -> None:
         "2026-04-02T19:00:00+00:00",
     ]
     assert [candidate.needs_article_fetch for candidate in candidates] == [True, True]
+
+
+def test_feed_collector_resolves_relative_links_against_feed_url() -> None:
+    feed_xml = """
+    <rss version="2.0">
+      <channel>
+        <title>EIA: Press Releases</title>
+        <item>
+          <title>EIA launches pilot survey on energy use at data centers</title>
+          <link>/pressroom/releases/press585.php</link>
+          <description>Energy Information Administration release summary.</description>
+          <pubDate>Wed, 25 Mar 2026 11:00:00 EST</pubDate>
+        </item>
+      </channel>
+    </rss>
+    """
+    collector = FeedCollector(http_client=InlineFixtureClient(feed_xml))
+
+    candidates = collector.collect(_source_by_id("eia_pressroom"))
+
+    assert len(candidates) == 1
+    assert candidates[0].candidate_url == "https://www.eia.gov/pressroom/releases/press585.php"
 
 
 def test_section_collector_extracts_whitehouse_cards() -> None:
@@ -78,6 +108,106 @@ def test_section_collector_extracts_reuters_topic_cards() -> None:
     assert [candidate.needs_article_fetch for candidate in candidates] == [True, True]
 
 
+def test_section_collector_extracts_ustr_field_content_links() -> None:
+    html = """
+    <html>
+      <body>
+        <span class="field-content">
+          <a href="/about/policy-offices/press-office/press-releases/2026/april/trade-deal-update">
+            USTR Announces Trade Deal Update
+          </a>
+        </span>
+        <span class="field-content">
+          <a href="/about-us/policy-offices/press-office/speeches-and-remarks">
+            Speeches and Remarks
+          </a>
+        </span>
+      </body>
+    </html>
+    """
+    collector = SectionCollector(http_client=InlineFixtureClient(html))
+
+    candidates = collector.collect(_source_by_id("ustr_press_releases"))
+
+    assert len(candidates) == 1
+    assert candidates[0].candidate_title == "USTR Announces Trade Deal Update"
+    assert candidates[0].candidate_url == (
+        "https://ustr.gov/about/policy-offices/press-office/press-releases/2026/april/trade-deal-update"
+    )
+
+
+def test_section_collector_extracts_treasury_press_release_cards() -> None:
+    html = """
+    <html>
+      <body>
+        <div class="news-title">
+          <a href="/news/press-releases/sb0433">Treasury Announces New Sanctions Action</a>
+        </div>
+        <p>Sanctions action targets an overseas shipping network.</p>
+        <div class="more-link">
+          <a href="/news/press-releases">View All Press Releases</a>
+        </div>
+      </body>
+    </html>
+    """
+    collector = SectionCollector(http_client=InlineFixtureClient(html))
+
+    candidates = collector.collect(_source_by_id("treasury_press_releases"))
+
+    assert len(candidates) == 1
+    assert candidates[0].candidate_title == "Treasury Announces New Sanctions Action"
+    assert candidates[0].candidate_summary == "Sanctions action targets an overseas shipping network."
+    assert candidates[0].candidate_url == "https://home.treasury.gov/news/press-releases/sb0433"
+
+
+def test_section_collector_extracts_bea_current_release_links() -> None:
+    html = """
+    <html>
+      <body>
+        <div class="view-content">
+          <a href="/news/2026/personal-income-and-outlays-january-2026">
+            Personal Income and Outlays, January 2026
+          </a>
+          <a href="/news/current-releases">News Releases</a>
+        </div>
+      </body>
+    </html>
+    """
+    collector = SectionCollector(http_client=InlineFixtureClient(html))
+
+    candidates = collector.collect(_source_by_id("bea_news"))
+
+    assert len(candidates) == 1
+    assert candidates[0].candidate_title == "Personal Income and Outlays, January 2026"
+    assert candidates[0].candidate_url == "https://www.bea.gov/news/2026/personal-income-and-outlays-january-2026"
+
+
+def test_section_collector_skips_ap_video_links_and_keeps_article_links() -> None:
+    html = """
+    <html>
+      <body>
+        <h3>
+          <a href="https://apnews.com/video/trump-addresses-economy">Trump addresses the economy in campaign stop</a>
+        </h3>
+        <h3>
+          <a href="https://apnews.com/article/stock-markets-trump-oil-war-iran-148682a5d853dbdb16aaf08e554b001b">
+            US stocks and oil prices flip-flop ahead of Trump deadline
+          </a>
+        </h3>
+      </body>
+    </html>
+    """
+    collector = SectionCollector(http_client=InlineFixtureClient(html))
+
+    candidates = collector.collect(_source_by_id("ap_business"))
+
+    assert len(candidates) == 1
+    assert candidates[0].candidate_title == "US stocks and oil prices flip-flop ahead of Trump deadline"
+    assert candidates[0].candidate_url == (
+        "https://apnews.com/article/stock-markets-trump-oil-war-iran-148682a5d853dbdb16aaf08e554b001b"
+    )
+
+
 def test_article_collector_canonicalizes_candidate_from_html() -> None:
     candidate = SourceCandidate(
         candidate_type="section_card",
@@ -95,6 +225,67 @@ def test_article_collector_canonicalizes_candidate_from_html() -> None:
     assert expanded.candidate_title == "Statement from the White House"
     assert expanded.candidate_summary.startswith("The White House announced")
     assert expanded.needs_article_fetch is False
+
+
+def test_article_collector_keeps_specific_candidate_title_when_page_title_is_generic() -> None:
+    html = """
+    <html>
+      <head>
+        <title>News Release</title>
+        <link rel="canonical" href="https://www.bea.gov/news/2026/personal-income-and-outlays-january-2026" />
+        <meta name="description" content="Personal income increased in January 2026 while spending cooled." />
+      </head>
+      <body>
+        <main>
+          <h1>News Release</h1>
+          <p>Personal income increased in January 2026 while spending cooled.</p>
+        </main>
+      </body>
+    </html>
+    """
+    candidate = SourceCandidate(
+        candidate_type="section_card",
+        candidate_url="https://www.bea.gov/news/2026/personal-income-and-outlays-january-2026",
+        candidate_title="Personal Income and Outlays, January 2026",
+        candidate_summary="",
+        needs_article_fetch=True,
+    )
+    collector = ArticleCollector(http_client=InlineFixtureClient(html))
+
+    expanded = collector.expand(candidate)
+
+    assert expanded.candidate_title == "Personal Income and Outlays, January 2026"
+    assert expanded.candidate_summary == "Personal income increased in January 2026 while spending cooled."
+
+
+def test_article_collector_keeps_specific_candidate_title_when_page_title_is_site_branding() -> None:
+    html = """
+    <html>
+      <head>
+        <title>U.S. Energy Information Administration - EIA - Independent Statistics and Analysis</title>
+        <link rel="canonical" href="https://www.eia.gov/pressroom/releases/press585.php" />
+        <meta name="description" content="Pilot survey tracks energy use at data centers." />
+      </head>
+      <body>
+        <main>
+          <h1>U.S. Energy Information Administration - EIA - Independent Statistics and Analysis</h1>
+          <p>Pilot survey tracks energy use at data centers.</p>
+        </main>
+      </body>
+    </html>
+    """
+    candidate = SourceCandidate(
+        candidate_type="feed_item",
+        candidate_url="https://www.eia.gov/pressroom/releases/press585.php",
+        candidate_title="EIA launches pilot survey on energy use at data centers",
+        candidate_summary="",
+        needs_article_fetch=True,
+    )
+    collector = ArticleCollector(http_client=InlineFixtureClient(html))
+
+    expanded = collector.expand(candidate)
+
+    assert expanded.candidate_title == "EIA launches pilot survey on energy use at data centers"
 
 
 def test_extract_article_shell_uses_main_or_article_before_global_paragraph() -> None:
@@ -182,3 +373,17 @@ def test_calendar_collector_parses_release_schedule_rows() -> None:
         "https://www.bls.gov/schedule/news_release/",
     ]
     assert [candidate.needs_article_fetch for candidate in candidates] == [True, True, False]
+
+
+def test_default_source_registry_prefers_capture_friendly_urls() -> None:
+    bea_source = _source_by_id("bea_news")
+    eia_source = _source_by_id("eia_pressroom")
+    cnbc_source = _source_by_id("cnbc_world")
+
+    assert bea_source.entry_urls == ("https://www.bea.gov/news/current-releases",)
+    assert eia_source.entry_type == "rss"
+    assert eia_source.entry_urls == ("https://www.eia.gov/rss/press_rss.xml",)
+    assert cnbc_source.entry_type == "rss"
+    assert cnbc_source.entry_urls == (
+        "https://search.cnbc.com/rs/search/combinedcms/view.xml?partnerId=wrss01&id=100727362",
+    )

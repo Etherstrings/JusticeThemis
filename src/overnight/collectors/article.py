@@ -84,6 +84,24 @@ def extract_article_shell(html: str, fallback_url: str) -> tuple[str, str, str]:
     return canonical_url, title, summary
 
 
+def _pick_better_title(existing_title: str, extracted_title: str) -> str:
+    candidate_title = extracted_title.strip()
+    original_title = existing_title.strip()
+    if not candidate_title:
+        return original_title
+    if not original_title:
+        return candidate_title
+
+    normalized_candidate = candidate_title.lower()
+    if normalized_candidate in {"news release", "press release", "release", "statement"}:
+        return original_title
+    if (" - " in candidate_title or " | " in candidate_title) and not any(character.isdigit() for character in candidate_title):
+        return original_title
+    if len(candidate_title) + 8 < len(original_title):
+        return original_title
+    return candidate_title
+
+
 class ArticleCollector:
     def __init__(self, http_client: object):
         self._http_client = http_client
@@ -94,7 +112,7 @@ class ArticleCollector:
         return replace(
             candidate,
             candidate_url=canonical_url,
-            candidate_title=canonical_title or candidate.candidate_title,
+            candidate_title=_pick_better_title(candidate.candidate_title, canonical_title),
             candidate_summary=canonical_summary or candidate.candidate_summary,
             needs_article_fetch=False,
         )
