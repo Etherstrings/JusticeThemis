@@ -149,7 +149,7 @@ export const overnightApi = {
     return toCamelCase<OvernightSourceListResponse>(response.data);
   },
 
-  getRecentSourceItems: async (limit = 12): Promise<OvernightCapturedSourceItemListResponse> => {
+  getRecentSourceItems: async (limit = 20): Promise<OvernightCapturedSourceItemListResponse> => {
     const response = await apiClient.get<Record<string, unknown>>('/api/v1/overnight/source-items', {
       params: { limit },
     });
@@ -158,8 +158,8 @@ export const overnightApi = {
 
   refreshSourceItems: async (
     limitPerSource = 2,
-    maxSources = 6,
-    recentLimit = 12
+    maxSources = 10,
+    recentLimit = 20
   ): Promise<OvernightSourceRefreshResponse> => {
     const response = await apiClient.post<Record<string, unknown>>('/api/v1/overnight/source-items/refresh', null, {
       params: {

@@ -103,6 +103,7 @@ class FakeOvernightService:
                 }
             ],
         }
+        self.last_refresh_args: dict[str, int] | None = None
 
     def list_event_history(self, *, page: int, limit: int, q: str | None = None):
         return {
@@ -388,6 +389,11 @@ class FakeOvernightService:
         }
 
     def refresh_source_items(self, *, limit_per_source: int = 2, max_sources: int = 6, recent_limit: int = 12):
+        self.last_refresh_args = {
+            "limit_per_source": limit_per_source,
+            "max_sources": max_sources,
+            "recent_limit": recent_limit,
+        }
         return {
             "collected_sources": 1,
             "collected_items": 1,
@@ -470,6 +476,7 @@ class FakeOvernightService:
 def client_with_data(client: TestClient) -> TestClient:
     fake_service = FakeOvernightService()
     client.app.dependency_overrides[get_overnight_service] = lambda: fake_service
+    setattr(client, "fake_overnight_service", fake_service)
     try:
         yield client
     finally:
@@ -630,6 +637,19 @@ def test_refresh_captured_source_items(client_with_data: TestClient) -> None:
     assert payload["collected_sources"] == 1
     assert payload["collected_items"] == 1
     assert payload["items"][0]["title"] == "Statement from the White House"
+
+
+def test_refresh_captured_source_items_uses_broader_defaults(client_with_data: TestClient) -> None:
+    response = client_with_data.post("/api/v1/overnight/source-items/refresh")
+
+    assert response.status_code == 200
+    service = getattr(client_with_data, "fake_overnight_service")
+    assert isinstance(service, FakeOvernightService)
+    assert service.last_refresh_args == {
+        "limit_per_source": 2,
+        "max_sources": 10,
+        "recent_limit": 20,
+    }
 
 
 def test_get_overnight_health(client_with_data: TestClient) -> None:

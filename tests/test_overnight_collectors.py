@@ -517,10 +517,13 @@ def test_calendar_collector_parses_release_schedule_rows() -> None:
 
 def test_default_source_registry_prefers_capture_friendly_urls() -> None:
     bea_source = _source_by_id("bea_news")
+    census_source = _source_by_id("census_economic_indicators")
     eia_source = _source_by_id("eia_pressroom")
     cnbc_source = _source_by_id("cnbc_world")
 
     assert bea_source.entry_urls == ("https://www.bea.gov/news/current-releases",)
+    assert census_source.entry_type == "rss"
+    assert census_source.entry_urls == ("https://www.census.gov/economic-indicators/indicator.xml",)
     assert eia_source.entry_type == "rss"
     assert eia_source.entry_urls == ("https://www.eia.gov/rss/press_rss.xml",)
     assert cnbc_source.entry_type == "rss"

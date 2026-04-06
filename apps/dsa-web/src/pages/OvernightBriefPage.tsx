@@ -636,7 +636,7 @@ const OvernightBriefPage: React.FC = () => {
     setSourceFeedRefreshSummary(null);
 
     try {
-      const response = await overnightApi.getRecentSourceItems(12);
+      const response = await overnightApi.getRecentSourceItems(20);
       setRecentSourceItems(response.items);
     } catch (error) {
       setSourceFeedError(error instanceof Error ? error.message : '加载最近抓取源失败');
@@ -651,7 +651,7 @@ const OvernightBriefPage: React.FC = () => {
     setSourceFeedRefreshSummary(null);
 
     try {
-      const response = await overnightApi.refreshSourceItems(2, 6, 12);
+      const response = await overnightApi.refreshSourceItems(2, 10, 20);
       setRecentSourceItems(response.items);
       setSourceFeedRefreshSummary(
         `本次刷新访问了 ${response.collectedSources} 个源，抓到 ${response.collectedItems} 条内容，下面展示最近 ${response.total} 条。`

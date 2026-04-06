@@ -323,8 +323,8 @@ def get_recent_source_items(
 @router.post("/source-items/refresh", response_model=OvernightSourceRefreshResponse)
 def refresh_source_items(
     limit_per_source: int = Query(2, ge=1, le=5, description="Max captured items per source"),
-    max_sources: int = Query(6, ge=1, le=20, description="Max sources to visit in one refresh"),
-    recent_limit: int = Query(12, ge=1, le=100, description="How many recent items to return after refresh"),
+    max_sources: int = Query(10, ge=1, le=20, description="Max sources to visit in one refresh"),
+    recent_limit: int = Query(20, ge=1, le=100, description="How many recent items to return after refresh"),
     service: OvernightService = Depends(get_overnight_service),
 ) -> OvernightSourceRefreshResponse:
     result = service.refresh_source_items(

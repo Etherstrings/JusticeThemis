@@ -494,8 +494,8 @@ class OvernightService:
         self,
         *,
         limit_per_source: int = 2,
-        max_sources: int = 6,
-        recent_limit: int = 12,
+        max_sources: int = 10,
+        recent_limit: int = 20,
     ) -> dict[str, Any]:
         return self.source_capture_service.refresh(
             limit_per_source=limit_per_source,
