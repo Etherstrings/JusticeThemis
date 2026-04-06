@@ -50,9 +50,11 @@ env/
 data/
 logs/
 reports/
+output/
 *.db
 *.sqlite
 *.sqlite3
+uv.lock
 
 # 系统文件
 .DS_Store
