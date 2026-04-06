@@ -25,6 +25,7 @@ import {
 } from '../utils/overnightView';
 import { buildEventDecisionLens, getEvidenceBadgeVariant } from '../utils/overnightDecision';
 import { groupSourcesByCoverageTier, readCoverageTierCount } from '../utils/overnightSourceCoverage';
+import { buildCapturedNewsItems } from '../utils/overnightSourceEvidence';
 
 function priorityVariant(priorityLevel?: string): 'danger' | 'warning' | 'info' | 'default' {
   switch ((priorityLevel || '').toUpperCase()) {
@@ -178,22 +179,6 @@ const WatchlistSection: React.FC<{ buckets: OvernightWatchBucket[]; briefId: str
       ))}
     </div>
   </Card>
-);
-
-const SourceList: React.FC<{ links: string[] }> = ({ links }) => (
-  <div className="space-y-2">
-    {links.map((link) => (
-      <a
-        key={link}
-        href={link}
-        target="_blank"
-        rel="noreferrer"
-        className="block rounded-xl border border-white/6 bg-white/[0.02] px-3 py-2 text-sm text-cyan transition hover:border-cyan/30 hover:bg-cyan/6"
-      >
-        {link}
-      </a>
-    ))}
-  </div>
 );
 
 const HistoryPanel: React.FC<{
@@ -580,6 +565,12 @@ const OvernightBriefPage: React.FC = () => {
 
   const detailToRender = selectedEvent;
   const selectedDecision = detailToRender ? eventDecisionMap.get(detailToRender.eventId) || null : null;
+  const capturedNewsItems = useMemo(() => {
+    if (!detailToRender || !selectedSources) {
+      return [];
+    }
+    return buildCapturedNewsItems(detailToRender, selectedSources, sources?.items || []);
+  }, [detailToRender, selectedSources, sources]);
   const totalHistoryPages = Math.max(1, Math.ceil(historyTotal / historyPageSize));
 
   const handleHistoryPageChange = (page: number) => {
@@ -758,16 +749,43 @@ const OvernightBriefPage: React.FC = () => {
               <div className="flex items-center justify-between gap-3">
                 <div>
                   <div className="text-xs uppercase tracking-[0.2em] text-muted">Primary Sources</div>
-                  <h3 className="mt-1 text-lg font-semibold text-white">当前事件源链接</h3>
+                  <h3 className="mt-1 text-lg font-semibold text-white">抓到的新闻来源</h3>
                 </div>
-                <Badge variant="default">{selectedSources?.links.length || 0}</Badge>
+                <Badge variant="default">{capturedNewsItems.length}</Badge>
               </div>
 
               <div className="mt-4">
-                {selectedSources?.links.length ? (
-                  <SourceList links={selectedSources.links} />
+                {capturedNewsItems.length ? (
+                  <div className="space-y-3">
+                    {capturedNewsItems.map((item) => (
+                      <a
+                        key={item.id}
+                        href={item.url}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="block rounded-2xl border border-white/6 bg-white/[0.02] px-4 py-3 transition hover:border-cyan/30 hover:bg-cyan/6"
+                      >
+                        <div className="flex items-center justify-between gap-3">
+                          <div className="text-sm font-medium text-white">{item.headline}</div>
+                          <div className="flex flex-wrap gap-2">
+                            {item.coverageTier === 'official_policy' || item.coverageTier === 'official_data' ? (
+                              <Badge variant="danger">官方源</Badge>
+                            ) : item.coverageTier === 'editorial_media' ? (
+                              <Badge variant="info">媒体源</Badge>
+                            ) : null}
+                            {item.sourceClass ? <Badge variant="default">{item.sourceClass}</Badge> : null}
+                          </div>
+                        </div>
+                        <div className="mt-2 text-sm text-secondary">来源: {item.sourceName}</div>
+                        {item.summary ? (
+                          <div className="mt-2 text-sm leading-6 text-secondary">{item.summary}</div>
+                        ) : null}
+                        <div className="mt-3 truncate text-sm text-cyan">{item.url}</div>
+                      </a>
+                    ))}
+                  </div>
                 ) : (
-                  <div className="text-sm text-secondary">当前选中事件还没有挂接原始链接。</div>
+                  <div className="text-sm text-secondary">当前选中事件还没有挂接可展示的新闻来源。</div>
                 )}
               </div>
             </Card>
