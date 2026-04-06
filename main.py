@@ -37,6 +37,7 @@ if os.getenv("GITHUB_ACTIONS") != "true" and os.getenv("USE_PROXY", "false").low
 
 import argparse
 import logging
+import socket
 import shutil
 import subprocess
 import sys
@@ -481,6 +482,20 @@ def start_api_server(host: str, port: int, config: Config) -> None:
     import threading
     import uvicorn
 
+    addrinfos = socket.getaddrinfo(host, port, type=socket.SOCK_STREAM)
+    bind_error = None
+    for family, socktype, proto, _, sockaddr in addrinfos:
+        try:
+            with socket.socket(family, socktype, proto) as probe:
+                probe.bind(sockaddr)
+            bind_error = None
+            break
+        except OSError as exc:
+            bind_error = exc
+
+    if bind_error is not None:
+        raise RuntimeError(f"端口已被占用，无法启动 FastAPI 服务: {host}:{port}") from bind_error
+
     def run_server():
         level_name = (config.log_level or "INFO").lower()
         uvicorn.run(
@@ -635,6 +650,9 @@ def main() -> int:
             bot_clients_started = True
         except Exception as e:
             logger.error(f"启动 FastAPI 服务失败: {e}")
+            if args.serve_only:
+                logger.error("仅 Web 服务模式下无法启动 FastAPI，程序退出")
+                return 1
 
     if bot_clients_started:
         start_bot_stream_clients(config)

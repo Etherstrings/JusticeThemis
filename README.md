@@ -79,7 +79,11 @@ cd JusticeThemis
 
 ### 2. Install Python dependencies
 
+Use Python `3.12` or newer for the local environment.
+
 ```bash
+uv venv --python 3.12 .venv
+source .venv/bin/activate
 pip install -r requirements.txt
 ```
 
