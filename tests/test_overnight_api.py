@@ -264,6 +264,10 @@ class FakeOvernightService:
                     "priority": 100,
                     "poll_interval_seconds": 300,
                     "is_mission_critical": True,
+                    "is_enabled": True,
+                    "coverage_tier": "official_policy",
+                    "region_focus": "US policy",
+                    "coverage_focus": "跟踪白宫政策声明、行政动作和事实清单。",
                 },
                 {
                     "source_id": "reuters_topics",
@@ -275,6 +279,10 @@ class FakeOvernightService:
                     "priority": 90,
                     "poll_interval_seconds": 600,
                     "is_mission_critical": False,
+                    "is_enabled": True,
+                    "coverage_tier": "editorial_media",
+                    "region_focus": "Global markets",
+                    "coverage_focus": "补充跨市场编辑部快讯与风险叙事。",
                 },
             ],
         }
@@ -284,7 +292,20 @@ class FakeOvernightService:
             "source_health": {
                 "total_sources": 2,
                 "mission_critical_sources": 1,
-                "whitelisted_sources": 0,
+                "whitelisted_sources": 2,
+                "enabled_mission_critical_sources": 1,
+                "coverage_tier_counts": {
+                    "official_policy": 1,
+                    "editorial_media": 1,
+                },
+                "source_class_counts": {
+                    "policy": 1,
+                    "market": 1,
+                },
+                "coverage_gaps": [
+                    "官方数据源覆盖不足",
+                    "当前没有日历型 mission-critical 源",
+                ],
             },
             "pipeline_health": {
                 "brief_count": 1,
@@ -492,6 +513,9 @@ def test_get_overnight_sources(client_with_data: TestClient) -> None:
     assert payload["total"] == 2
     assert payload["mission_critical"] == 1
     assert payload["items"][0]["source_id"] == "whitehouse_news"
+    assert payload["items"][0]["coverage_tier"] == "official_policy"
+    assert payload["items"][0]["region_focus"] == "US policy"
+    assert payload["items"][0]["coverage_focus"]
 
 
 def test_get_overnight_health(client_with_data: TestClient) -> None:
@@ -504,6 +528,10 @@ def test_get_overnight_health(client_with_data: TestClient) -> None:
     assert payload["content_quality"]["average_confidence"] == 0.84
     assert payload["content_quality"]["minimum_evidence_gate_passed"] is True
     assert payload["delivery_health"]["notification_available"] is False
+    assert payload["source_health"]["enabled_mission_critical_sources"] == 1
+    assert payload["source_health"]["coverage_tier_counts"]["official_policy"] == 1
+    assert payload["source_health"]["source_class_counts"]["policy"] == 1
+    assert payload["source_health"]["coverage_gaps"][0] == "官方数据源覆盖不足"
 
 
 def test_submit_overnight_feedback(client_with_data: TestClient) -> None:

@@ -5,6 +5,7 @@ from __future__ import annotations
 
 from dataclasses import replace
 import re
+from collections import Counter
 from typing import Any
 
 from src.config import get_config
@@ -454,6 +455,9 @@ class OvernightService:
                     "poll_interval_seconds": source.poll_interval_seconds,
                     "is_mission_critical": source.is_mission_critical,
                     "is_enabled": source.source_id in enabled_source_ids,
+                    "coverage_tier": source.coverage_tier,
+                    "region_focus": source.region_focus,
+                    "coverage_focus": source.coverage_focus,
                 }
                 for source in sources
             ],
@@ -462,6 +466,9 @@ class OvernightService:
     def get_health_summary(self) -> dict[str, Any]:
         sources = build_default_source_registry()
         enabled_source_ids = self._get_enabled_source_ids(sources)
+        enabled_sources = [
+            source for source in sources if str(source.source_id) in enabled_source_ids
+        ]
         latest_brief = self.repo.get_latest_morning_brief()
         history = self.repo.list_morning_briefs(page=1, limit=1)
         notification_service = NotificationService()
@@ -469,6 +476,16 @@ class OvernightService:
             channel.value
             for channel in notification_service.get_available_channels()
         ]
+        coverage_tier_counts = Counter(
+            source.coverage_tier
+            for source in enabled_sources
+            if str(source.coverage_tier).strip()
+        )
+        source_class_counts = Counter(
+            source.source_class
+            for source in enabled_sources
+            if str(source.source_class).strip()
+        )
 
         return {
             "source_health": {
@@ -477,6 +494,16 @@ class OvernightService:
                     1 for source in sources if source.is_mission_critical
                 ),
                 "whitelisted_sources": len(enabled_source_ids),
+                "enabled_mission_critical_sources": sum(
+                    1 for source in enabled_sources if source.is_mission_critical
+                ),
+                "coverage_tier_counts": dict(coverage_tier_counts),
+                "source_class_counts": dict(source_class_counts),
+                "coverage_gaps": self._build_source_coverage_gaps(
+                    enabled_sources=enabled_sources,
+                    coverage_tier_counts=coverage_tier_counts,
+                    source_class_counts=source_class_counts,
+                ),
             },
             "pipeline_health": {
                 "brief_count": int(history.get("total", 0) or 0),
@@ -562,6 +589,26 @@ class OvernightService:
             "minimum_evidence_gate_passed": top_event_count > 0 and events_with_primary_sources == top_event_count,
             "duplication_gate_passed": duplicate_core_fact_count == 0,
         }
+
+    def _build_source_coverage_gaps(
+        self,
+        *,
+        enabled_sources: list[Any],
+        coverage_tier_counts: Counter[str],
+        source_class_counts: Counter[str],
+    ) -> list[str]:
+        gaps: list[str] = []
+        if coverage_tier_counts.get("official_policy", 0) < 3:
+            gaps.append("官方政策源覆盖仍偏薄")
+        if coverage_tier_counts.get("official_data", 0) < 2:
+            gaps.append("官方数据源覆盖不足")
+        if coverage_tier_counts.get("editorial_media", 0) < 2:
+            gaps.append("当前只覆盖少量主流媒体入口")
+        if source_class_counts.get("calendar", 0) == 0:
+            gaps.append("当前没有日历型 mission-critical 源")
+        if not any(source.is_mission_critical for source in enabled_sources):
+            gaps.append("当前没有启用 mission-critical 源")
+        return gaps
 
     def submit_feedback(
         self,

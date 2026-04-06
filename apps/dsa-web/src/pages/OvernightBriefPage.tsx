@@ -24,6 +24,7 @@ import {
   summarizeOvernightBoardItem,
 } from '../utils/overnightView';
 import { buildEventDecisionLens, getEvidenceBadgeVariant } from '../utils/overnightDecision';
+import { groupSourcesByCoverageTier, readCoverageTierCount } from '../utils/overnightSourceCoverage';
 
 function priorityVariant(priorityLevel?: string): 'danger' | 'warning' | 'info' | 'default' {
   switch ((priorityLevel || '').toUpperCase()) {
@@ -278,40 +279,58 @@ const SourceCatalogPanel: React.FC<{
     ) : !sources || sources.items.length === 0 ? (
       <div className="mt-4 text-sm text-secondary">当前还没有可展示的源目录。</div>
     ) : (
-      <div className="mt-4 space-y-3">
-        {sources.items.map((source) => (
-          <div key={source.sourceId} className="rounded-2xl border border-white/6 bg-white/[0.02] px-4 py-3">
-            <div className="flex items-start justify-between gap-3">
-              <div>
-                <div className="text-sm font-medium text-white">{source.displayName}</div>
-                <div className="mt-1 text-xs uppercase tracking-[0.18em] text-muted">{source.sourceId}</div>
-              </div>
-              <div className="flex flex-wrap items-center justify-end gap-2">
-                <Badge variant={source.isEnabled ? 'success' : 'default'}>
-                  {source.isEnabled ? '已启用' : '未启用'}
-                </Badge>
-                {source.isMissionCritical ? <Badge variant="danger">关键源</Badge> : null}
+      <div className="mt-4 space-y-4">
+        {groupSourcesByCoverageTier(sources.items).map((group) => (
+          <div key={group.key} className="space-y-3">
+            <div className="rounded-2xl border border-white/6 bg-white/[0.02] px-4 py-3">
+              <div className="flex items-center justify-between gap-3">
+                <div>
+                  <div className="text-sm font-medium text-white">{group.title}</div>
+                  <div className="mt-1 text-xs leading-5 text-secondary">{group.description}</div>
+                </div>
+                <Badge variant="default">{group.items.length}</Badge>
               </div>
             </div>
-            <div className="mt-3 flex flex-wrap gap-2 text-xs text-secondary">
-              <span>{source.sourceClass}</span>
-              <span>·</span>
-              <span>{source.entryType}</span>
-              <span>·</span>
-              <span>{Math.round(source.pollIntervalSeconds / 60)} 分钟轮询</span>
-              <span>·</span>
-              <span>优先级 {source.priority}</span>
-            </div>
-            {source.entryUrls[0] ? (
-              <a
-                href={source.entryUrls[0]}
-                target="_blank"
-                rel="noreferrer"
-                className="mt-3 block truncate text-sm text-cyan transition hover:text-cyan/80"
-              >
-                {source.entryUrls[0]}
-              </a>
-            ) : null}
+
+            {group.items.map((source) => (
+              <div key={source.sourceId} className="rounded-2xl border border-white/6 bg-white/[0.02] px-4 py-3">
+                <div className="flex items-start justify-between gap-3">
+                  <div>
+                    <div className="text-sm font-medium text-white">{source.displayName}</div>
+                    <div className="mt-1 text-xs uppercase tracking-[0.18em] text-muted">{source.sourceId}</div>
+                  </div>
+                  <div className="flex flex-wrap items-center justify-end gap-2">
+                    <Badge variant={source.isEnabled ? 'success' : 'default'}>
+                      {source.isEnabled ? '已启用' : '未启用'}
+                    </Badge>
+                    {source.isMissionCritical ? <Badge variant="danger">关键源</Badge> : null}
+                  </div>
+                </div>
+                <div className="mt-3 flex flex-wrap gap-2 text-xs text-secondary">
+                  <span>{source.sourceClass}</span>
+                  <span>·</span>
+                  <span>{source.entryType}</span>
+                  <span>·</span>
+                  <span>{Math.round(source.pollIntervalSeconds / 60)} 分钟轮询</span>
+                  <span>·</span>
+                  <span>优先级 {source.priority}</span>
+                </div>
+                <div className="mt-3 space-y-1 text-sm text-secondary">
+                  <div>Region focus: {source.regionFocus || '未标注'}</div>
+                  <div>{source.coverageFocus || '当前还没有补充这条源的覆盖说明。'}</div>
+                </div>
+                {source.entryUrls[0] ? (
+                  <a
+                    href={source.entryUrls[0]}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="mt-3 block truncate text-sm text-cyan transition hover:text-cyan/80"
+                  >
+                    {source.entryUrls[0]}
+                  </a>
+                ) : null}
+              </div>
+            ))}
           </div>
         ))}
       </div>
@@ -349,6 +368,9 @@ const HealthPanel: React.FC<{
             <div className="mt-2 text-2xl font-semibold text-white">{health.sourceHealth.totalSources}</div>
             <div className="mt-2 text-xs text-secondary">
               关键源 {health.sourceHealth.missionCriticalSources} / 当前启用 {health.sourceHealth.whitelistedSources}
+            </div>
+            <div className="mt-1 text-xs text-secondary">
+              已启用关键源 {health.sourceHealth.enabledMissionCriticalSources}
             </div>
           </div>
           <div className="rounded-2xl border border-white/6 bg-white/[0.02] px-4 py-3">
@@ -393,6 +415,31 @@ const HealthPanel: React.FC<{
             <div className="mt-2 text-xs text-secondary">
               {health.contentQuality.duplicationGatePassed ? '未发现重复核心事实' : '存在重复核心事实'}
             </div>
+          </div>
+        </div>
+
+        <div className="grid gap-3 md:grid-cols-2">
+          <div className="rounded-2xl border border-white/6 bg-white/[0.02] px-4 py-3">
+              <div className="text-xs uppercase tracking-[0.18em] text-muted">Coverage Layers</div>
+              <div className="mt-3 space-y-2 text-sm text-secondary">
+              <div>官方政策: {readCoverageTierCount(health.sourceHealth.coverageTierCounts, 'official_policy')}</div>
+              <div>官方数据: {readCoverageTierCount(health.sourceHealth.coverageTierCounts, 'official_data')}</div>
+              <div>主流媒体: {readCoverageTierCount(health.sourceHealth.coverageTierCounts, 'editorial_media')}</div>
+              </div>
+          </div>
+          <div className="rounded-2xl border border-white/6 bg-white/[0.02] px-4 py-3">
+            <div className="text-xs uppercase tracking-[0.18em] text-muted">Coverage Gaps</div>
+            {health.sourceHealth.coverageGaps.length === 0 ? (
+              <div className="mt-3 text-sm text-secondary">当前覆盖层没有明显缺口。</div>
+            ) : (
+              <div className="mt-3 space-y-2">
+                {health.sourceHealth.coverageGaps.map((gap) => (
+                  <div key={gap} className="text-sm text-secondary">
+                    {gap}
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
         </div>
 

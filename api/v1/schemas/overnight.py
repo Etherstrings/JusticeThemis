@@ -201,6 +201,9 @@ class OvernightSourceResponse(BaseModel):
     poll_interval_seconds: int = Field(..., description="Suggested poll interval in seconds")
     is_mission_critical: bool = Field(False, description="Whether the source is mission critical")
     is_enabled: bool = Field(False, description="Whether the source is currently enabled by whitelist settings")
+    coverage_tier: str = Field("", description="Coverage tier used by the overnight source catalog")
+    region_focus: str = Field("", description="Region or market focus of the source")
+    coverage_focus: str = Field("", description="Human-readable explanation of why the source is tracked")
 
 
 class OvernightSourceListResponse(BaseModel):
@@ -217,6 +220,10 @@ class OvernightSourceHealthResponse(BaseModel):
     total_sources: int = Field(..., description="Total registered sources")
     mission_critical_sources: int = Field(..., description="Mission critical sources")
     whitelisted_sources: int = Field(..., description="Sources currently enabled by whitelist settings")
+    enabled_mission_critical_sources: int = Field(..., description="Mission critical sources currently enabled")
+    coverage_tier_counts: dict[str, int] = Field(default_factory=dict, description="Enabled-source counts by coverage tier")
+    source_class_counts: dict[str, int] = Field(default_factory=dict, description="Enabled-source counts by source class")
+    coverage_gaps: list[str] = Field(default_factory=list, description="Human-readable source coverage gaps")
 
 
 class OvernightPipelineHealthResponse(BaseModel):

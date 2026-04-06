@@ -165,6 +165,9 @@ export interface OvernightSourceCatalogItem {
   pollIntervalSeconds: number;
   isMissionCritical: boolean;
   isEnabled: boolean;
+  coverageTier: string;
+  regionFocus: string;
+  coverageFocus: string;
 }
 
 export interface OvernightSourceListResponse {
@@ -177,6 +180,10 @@ export interface OvernightSourceHealth {
   totalSources: number;
   missionCriticalSources: number;
   whitelistedSources: number;
+  enabledMissionCriticalSources: number;
+  coverageTierCounts: Record<string, number>;
+  sourceClassCounts: Record<string, number>;
+  coverageGaps: string[];
 }
 
 export interface OvernightPipelineHealth {

@@ -17,6 +17,9 @@ class SourceDefinition:
     priority: int
     poll_interval_seconds: int
     is_mission_critical: bool = False
+    coverage_tier: str = ""
+    region_focus: str = ""
+    coverage_focus: str = ""
 
 
 @dataclass(frozen=True)
