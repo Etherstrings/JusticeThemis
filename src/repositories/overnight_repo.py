@@ -176,6 +176,26 @@ class OvernightRepository:
                 for row in rows
             ]
 
+    def list_latest_source_items_by_urls(self, urls: list[str]) -> dict[str, StoredSourceItem]:
+        normalized_urls = [str(url).strip() for url in urls if str(url).strip()]
+        if not normalized_urls:
+            return {}
+
+        with self.db.get_session() as session:
+            rows = session.execute(
+                select(OvernightSourceItem)
+                .where(OvernightSourceItem.canonical_url.in_(normalized_urls))
+                .order_by(OvernightSourceItem.created_at.desc(), OvernightSourceItem.id.desc())
+            ).scalars().all()
+
+        latest_by_url: dict[str, StoredSourceItem] = {}
+        for row in rows:
+            canonical_url = str(row.canonical_url).strip()
+            if not canonical_url or canonical_url in latest_by_url:
+                continue
+            latest_by_url[canonical_url] = self._to_stored_item(row)
+        return latest_by_url
+
     def upsert_event_cluster(self, core_fact: str, event_type: str, event_subtype: str) -> int:
         with self.db.get_session() as session:
             existing = session.execute(

@@ -16,6 +16,7 @@ from src.overnight.source_registry import build_default_source_registry
 from src.notification import NotificationService
 from src.repositories.overnight_repo import OvernightRepository
 from src.services.overnight_judgment_service import OvernightJudgmentService
+from src.services.overnight_source_excerpt_service import OvernightSourceExcerptService
 
 
 class OvernightBriefNotFoundError(LookupError):
@@ -84,10 +85,12 @@ class OvernightService:
         runner: OvernightRunner | None = None,
         repo: OvernightRepository | None = None,
         judgment_service: OvernightJudgmentService | None = None,
+        source_excerpt_service: OvernightSourceExcerptService | None = None,
     ) -> None:
         self.runner = runner or OvernightRunner()
         self.repo = repo or OvernightRepository()
         self.judgment_service = judgment_service or OvernightJudgmentService()
+        self.source_excerpt_service = source_excerpt_service or OvernightSourceExcerptService(repo=self.repo)
 
     def get_latest_brief(self) -> MorningExecutiveBrief:
         latest = self.repo.get_latest_morning_brief()
@@ -666,16 +669,27 @@ class OvernightService:
 
         return [
             {
-                "headline": self._derive_evidence_headline(link, fallback=fallback_headline),
+                "headline": (
+                    stored_item.title.strip()
+                    if stored_item is not None and stored_item.title.strip()
+                    else self._derive_evidence_headline(link, fallback=fallback_headline)
+                ),
                 "source_name": matched.display_name if matched is not None else self._read_hostname(link) or "未知来源",
                 "url": link,
-                "summary": self._build_evidence_summary(event, matched),
+                "summary": self._build_evidence_summary(event, matched, stored_item=stored_item),
                 "source_type": self._derive_source_type(matched),
                 "coverage_tier": matched.coverage_tier if matched is not None else "",
                 "source_class": matched.source_class if matched is not None else "",
             }
             for link in source_links
             for matched in [self._match_registry_source(link, registry)]
+            for stored_item in [
+                self.source_excerpt_service.resolve(
+                    url=link,
+                    fallback_title=fallback_headline,
+                    source_id=matched.source_id if matched is not None else self._read_hostname(link) or "event_detail_fetch",
+                )
+            ]
         ]
 
     def _match_registry_source(self, url: str, registry: list[Any]) -> Any | None:
@@ -698,11 +712,20 @@ class OvernightService:
                 return source
         return None
 
-    def _build_evidence_summary(self, event: dict[str, Any], matched_source: Any | None) -> str:
+    def _build_evidence_summary(
+        self,
+        event: dict[str, Any],
+        matched_source: Any | None,
+        *,
+        stored_item: Any | None = None,
+    ) -> str:
         parts: list[str] = []
+        stored_summary = str(getattr(stored_item, "summary", "") or "").strip()
+        if stored_summary:
+            parts.append(stored_summary)
         summary = str(event.get("summary", "")).strip()
         why_it_matters = str(event.get("why_it_matters", "")).strip()
-        if summary:
+        if summary and summary not in parts:
             parts.append(summary)
         if why_it_matters and why_it_matters not in parts:
             parts.append(why_it_matters)
