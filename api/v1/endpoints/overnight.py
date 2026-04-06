@@ -270,10 +270,11 @@ def get_topic_history(
 @router.get("/events/{event_id}", response_model=OvernightEventResponse)
 def get_event_detail(
     event_id: str,
+    brief_id: str | None = Query(None, description="Optional brief id override for historical event details"),
     service: OvernightService = Depends(get_overnight_service),
 ) -> OvernightEventResponse:
     try:
-        return OvernightEventResponse.model_validate(service.get_event_detail(event_id))
+        return OvernightEventResponse.model_validate(service.get_event_detail(event_id, brief_id=brief_id))
     except LookupError as exc:
         raise HTTPException(
             status_code=404,

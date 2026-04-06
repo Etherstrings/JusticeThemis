@@ -157,9 +157,32 @@ class FakeOvernightService:
             ],
         }
 
-    def get_event_detail(self, event_id: str):
+    def get_event_detail(self, event_id: str, brief_id: str | None = None):
         if event_id != "event_123":
             raise LookupError(event_id)
+        if brief_id == "brief_hist":
+            return {
+                "event_id": event_id,
+                "priority_level": "P1",
+                "core_fact": "USTR announced new tariffs",
+                "summary": "Historical brief kept the tariff story on watch.",
+                "why_it_matters": "Trade policy remained a follow-through catalyst.",
+                "confidence": 0.72,
+                "source_links": ["https://www.ustr.gov/historical-release"],
+                "evidence_items": [
+                    {
+                        "headline": "Historical tariff follow-up",
+                        "source_name": "USTR Press Releases",
+                        "url": "https://www.ustr.gov/historical-release",
+                        "summary": "Historical brief kept the tariff story on watch.",
+                        "source_type": "official",
+                        "coverage_tier": "official_policy",
+                        "source_class": "policy",
+                    }
+                ],
+                "judgment_summary": "这条更像历史晨报里的延续线，先看国产替代是否再次放量。",
+                "judgment_mode": "heuristic",
+            }
         return {
             "event_id": event_id,
             "priority_level": "P0",
@@ -167,6 +190,20 @@ class FakeOvernightService:
             "summary": "Tariff escalation was published by USTR.",
             "why_it_matters": "Trade policy became the main overnight driver.",
             "confidence": 0.84,
+            "source_links": ["https://www.ustr.gov/example-release"],
+            "evidence_items": [
+                {
+                    "headline": "Example release",
+                    "source_name": "USTR Press Releases",
+                    "url": "https://www.ustr.gov/example-release",
+                    "summary": "Tariff escalation was published by USTR.",
+                    "source_type": "official",
+                    "coverage_tier": "official_policy",
+                    "source_class": "policy",
+                }
+            ],
+            "judgment_summary": "这条更像盘前主线预热，先看自主可控和航运替代链是否同步确认。",
+            "judgment_mode": "heuristic",
         }
 
     def get_brief_delta(self, brief_id: str | None = None):
@@ -436,7 +473,23 @@ def test_get_overnight_brief_delta_by_id(client_with_data: TestClient) -> None:
 def test_get_overnight_event_detail(client_with_data: TestClient) -> None:
     response = client_with_data.get("/api/v1/overnight/events/event_123")
     assert response.status_code == 200
-    assert response.json()["event_id"] == "event_123"
+    payload = response.json()
+    assert payload["event_id"] == "event_123"
+    assert payload["source_links"] == ["https://www.ustr.gov/example-release"]
+    assert payload["evidence_items"][0]["source_name"] == "USTR Press Releases"
+    assert payload["evidence_items"][0]["source_type"] == "official"
+    assert payload["judgment_summary"] == "这条更像盘前主线预热，先看自主可控和航运替代链是否同步确认。"
+    assert payload["judgment_mode"] == "heuristic"
+
+
+def test_get_overnight_event_detail_supports_brief_override(client_with_data: TestClient) -> None:
+    response = client_with_data.get("/api/v1/overnight/events/event_123?brief_id=brief_hist")
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["priority_level"] == "P1"
+    assert payload["source_links"] == ["https://www.ustr.gov/historical-release"]
+    assert payload["evidence_items"][0]["headline"] == "Historical tariff follow-up"
+    assert payload["judgment_summary"] == "这条更像历史晨报里的延续线，先看国产替代是否再次放量。"
 
 
 def test_get_overnight_brief_history(client_with_data: TestClient) -> None:

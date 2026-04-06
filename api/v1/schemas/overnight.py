@@ -98,6 +98,10 @@ class OvernightEventResponse(BaseModel):
     summary: str = Field("", description="Summary")
     why_it_matters: str = Field("", description="Why it matters")
     confidence: float = Field(0.0, description="Confidence score")
+    source_links: list[str] = Field(default_factory=list, description="Raw source links attached to the event")
+    evidence_items: list[dict[str, Any]] = Field(default_factory=list, description="Readable evidence items for the event")
+    judgment_summary: str = Field("", description="One-line judgment for the event")
+    judgment_mode: str = Field("", description="Whether the judgment came from model or heuristic logic")
 
 
 class OvernightBriefHistoryItemResponse(BaseModel):

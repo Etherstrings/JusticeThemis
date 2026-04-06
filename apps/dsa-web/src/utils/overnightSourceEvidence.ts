@@ -1,4 +1,9 @@
-import type { OvernightEventSummary, OvernightPrimarySourceGroup, OvernightSourceCatalogItem } from '../types/overnight';
+import type {
+  OvernightEventDetail,
+  OvernightEventSummary,
+  OvernightPrimarySourceGroup,
+  OvernightSourceCatalogItem,
+} from '../types/overnight';
 
 export interface CapturedNewsItem {
   id: string;
@@ -62,11 +67,29 @@ function matchCatalogSource(
   );
 }
 
+function hasStructuredEvidence(
+  event: OvernightEventSummary | OvernightEventDetail
+): event is OvernightEventDetail {
+  return Array.isArray((event as OvernightEventDetail).evidenceItems);
+}
+
 export function buildCapturedNewsItems(
-  event: OvernightEventSummary,
+  event: OvernightEventSummary | OvernightEventDetail,
   sourceGroup: OvernightPrimarySourceGroup | null,
   catalog: OvernightSourceCatalogItem[]
 ): CapturedNewsItem[] {
+  if (hasStructuredEvidence(event) && event.evidenceItems.length > 0) {
+    return event.evidenceItems.map((item) => ({
+      id: `${event.eventId}:${item.url}`,
+      url: item.url,
+      headline: item.headline || event.coreFact,
+      sourceName: item.sourceName || '未知来源',
+      coverageTier: item.coverageTier || '',
+      sourceClass: item.sourceClass || '',
+      summary: item.summary || event.summary || event.whyItMatters,
+    }));
+  }
+
   if (!sourceGroup?.links.length) {
     return [];
   }
@@ -85,4 +108,14 @@ export function buildCapturedNewsItems(
       summary: event.summary || event.whyItMatters,
     };
   });
+}
+
+export function readEventJudgmentSummary(
+  event: OvernightEventSummary | OvernightEventDetail,
+  fallback: string
+): string {
+  if (hasStructuredEvidence(event) && event.judgmentSummary.trim()) {
+    return event.judgmentSummary.trim();
+  }
+  return fallback;
 }

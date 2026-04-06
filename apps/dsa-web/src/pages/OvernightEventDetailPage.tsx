@@ -13,6 +13,7 @@ import type {
   OvernightEventDetail,
   OvernightEventHistoryItem,
   OvernightEventSummary,
+  OvernightPrimarySourceGroup,
   OvernightWatchBucket,
 } from '../types/overnight';
 import {
@@ -29,6 +30,7 @@ import {
   type OvernightShiftTone,
 } from '../utils/overnightEventContext';
 import { buildRelatedEventLinks } from '../utils/overnightLinkage';
+import { buildCapturedNewsItems, readEventJudgmentSummary } from '../utils/overnightSourceEvidence';
 import { buildOvernightTopicHref } from '../utils/overnightView';
 
 const StateCard: React.FC<{ title: string; body: string }> = ({ title, body }) => (
@@ -128,20 +130,26 @@ const OvernightEventDetailPage: React.FC = () => {
 
         const matchedEvent = nextBrief.topEvents.find((item) => item.eventId === eventId) || null;
         const matchedSources = nextBrief.primarySources.find((item) => item.eventId === eventId)?.links || [];
-
         if (matchedEvent) {
           setEvent(matchedEvent);
           setSourceLinks(matchedSources);
-          return;
         }
 
-        if (!requestedBriefId) {
-          const detail = await overnightApi.getEventDetail(eventId);
+        try {
+          const detail = await overnightApi.getEventDetail(eventId, requestedBriefId || nextBrief.briefId);
           if (detail) {
             setEvent(detail);
-            setSourceLinks(matchedSources);
+            setSourceLinks(detail.sourceLinks.length ? detail.sourceLinks : matchedSources);
             return;
           }
+        } catch {
+          if (!matchedEvent) {
+            throw new Error('加载事件增强详情失败');
+          }
+        }
+
+        if (matchedEvent) {
+          return;
         }
 
         setEvent(null);
@@ -250,6 +258,27 @@ const OvernightEventDetailPage: React.FC = () => {
     () => (brief && event ? buildRelatedEventLinks(brief, event, delta) : []),
     [brief, event, delta]
   );
+  const sourceGroup = useMemo<OvernightPrimarySourceGroup | null>(() => {
+    if (!brief) {
+      return null;
+    }
+    return brief.primarySources.find((item) => item.eventId === eventId) || null;
+  }, [brief, eventId]);
+  const capturedNewsItems = useMemo(() => {
+    if (!event) {
+      return [];
+    }
+    return buildCapturedNewsItems(event, sourceGroup, []);
+  }, [event, sourceGroup]);
+  const judgmentSummary = useMemo(() => {
+    if (!event) {
+      return '';
+    }
+    return readEventJudgmentSummary(
+      event,
+      eventAction?.action || '先看竞价和第一定价对象是否扩散，没有确认前不要把它升级成全天主线。'
+    );
+  }, [event, eventAction]);
   const historyHref = useMemo(() => {
     if (!event?.coreFact) {
       return '/overnight/history?view=event';
@@ -401,6 +430,12 @@ const OvernightEventDetailPage: React.FC = () => {
                     <div className="mt-1 text-sm leading-6 text-secondary">
                       可能涨价: {eventDecision.ashareLens.pricePressureAreas.join(' / ')}
                     </div>
+                  </div>
+                ) : null}
+                {judgmentSummary ? (
+                  <div className="rounded-2xl border border-white/6 bg-white/[0.02] px-4 py-4">
+                    <div className="text-xs uppercase tracking-[0.18em] text-muted">一句判断</div>
+                    <div className="mt-2 text-sm leading-6 text-white/90">{judgmentSummary}</div>
                   </div>
                 ) : null}
               </div>
@@ -630,27 +665,44 @@ const OvernightEventDetailPage: React.FC = () => {
             <Card variant="bordered" padding="md">
               <div className="flex items-center justify-between gap-3">
                 <div>
-                  <div className="text-xs uppercase tracking-[0.2em] text-muted">Primary Sources</div>
-                  <h2 className="mt-1 text-lg font-semibold text-white">原始链接</h2>
+                  <div className="text-xs uppercase tracking-[0.2em] text-muted">Captured Evidence</div>
+                  <h2 className="mt-1 text-lg font-semibold text-white">抓到的新闻来源</h2>
                 </div>
-                <Badge variant="default">{sourceLinks.length}</Badge>
+                <Badge variant="default">{capturedNewsItems.length}</Badge>
               </div>
 
-              <div className="mt-4 space-y-2">
-                {sourceLinks.length > 0 ? (
-                  sourceLinks.map((link) => (
-                    <a
-                      key={link}
-                      href={link}
-                      target="_blank"
-                      rel="noreferrer"
-                      className="block rounded-xl border border-white/6 bg-white/[0.02] px-3 py-2 text-sm text-cyan transition hover:border-cyan/30 hover:bg-cyan/6"
-                    >
-                      {link}
-                    </a>
-                  ))
+              <div className="mt-4">
+                {capturedNewsItems.length > 0 ? (
+                  <div className="space-y-3">
+                    {capturedNewsItems.map((item) => (
+                      <a
+                        key={item.id}
+                        href={item.url}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="block rounded-2xl border border-white/6 bg-white/[0.02] px-4 py-3 transition hover:border-cyan/30 hover:bg-cyan/6"
+                      >
+                        <div className="flex items-center justify-between gap-3">
+                          <div className="text-sm font-medium text-white">{item.headline}</div>
+                          <div className="flex flex-wrap gap-2">
+                            {item.coverageTier === 'official_policy' || item.coverageTier === 'official_data' ? (
+                              <Badge variant="danger">官方源</Badge>
+                            ) : item.coverageTier === 'editorial_media' ? (
+                              <Badge variant="info">媒体源</Badge>
+                            ) : null}
+                            {item.sourceClass ? <Badge variant="default">{item.sourceClass}</Badge> : null}
+                          </div>
+                        </div>
+                        <div className="mt-2 text-sm text-secondary">来源: {item.sourceName}</div>
+                        {item.summary ? (
+                          <div className="mt-2 text-sm leading-6 text-secondary">{item.summary}</div>
+                        ) : null}
+                        <div className="mt-3 truncate text-sm text-cyan">{item.url}</div>
+                      </a>
+                    ))}
+                  </div>
                 ) : (
-                  <div className="text-sm text-secondary">当前事件还没有挂接到 primary source links。</div>
+                  <div className="text-sm text-secondary">当前事件还没有挂接到可展示的新闻证据。</div>
                 )}
               </div>
             </Card>

@@ -1,7 +1,12 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import type { OvernightEventSummary, OvernightPrimarySourceGroup, OvernightSourceCatalogItem } from '../src/types/overnight';
-import { buildCapturedNewsItems } from '../src/utils/overnightSourceEvidence';
+import type {
+  OvernightEventDetail,
+  OvernightEventSummary,
+  OvernightPrimarySourceGroup,
+  OvernightSourceCatalogItem,
+} from '../src/types/overnight';
+import { buildCapturedNewsItems, readEventJudgmentSummary } from '../src/utils/overnightSourceEvidence';
 
 const event: OvernightEventSummary = {
   eventId: 'evt-001',
@@ -74,4 +79,46 @@ test('buildCapturedNewsItems falls back to event core fact when link path is not
 
   assert.equal(items[0]?.sourceName, 'example.com');
   assert.equal(items[0]?.headline, 'USTR announced new tariffs');
+});
+
+test('buildCapturedNewsItems prefers backend evidence items when provided', () => {
+  const detail: OvernightEventDetail = {
+    ...event,
+    sourceLinks: sourceGroup.links,
+    evidenceItems: [
+      {
+        headline: 'Tariff update for critical minerals',
+        sourceName: 'USTR Press Releases',
+        url: 'https://ustr.gov/about-us/policy-offices/press-office/press-releases/2026/april/tariff-update-for-critical-minerals',
+        summary: 'USTR published the tariff update and framed it as a direct trade-policy escalation.',
+        sourceType: 'official',
+        coverageTier: 'official_policy',
+        sourceClass: 'policy',
+      },
+    ],
+    judgmentSummary: '这条更像盘前主线预热，先看自主可控和航运替代链是否同步确认。',
+    judgmentMode: 'heuristic',
+  };
+
+  const items = buildCapturedNewsItems(detail, sourceGroup, catalog);
+
+  assert.equal(items.length, 1);
+  assert.equal(items[0]?.headline, 'Tariff update for critical minerals');
+  assert.equal(items[0]?.summary, 'USTR published the tariff update and framed it as a direct trade-policy escalation.');
+});
+
+test('readEventJudgmentSummary prefers backend sentence and falls back gracefully', () => {
+  const detail: OvernightEventDetail = {
+    ...event,
+    sourceLinks: sourceGroup.links,
+    evidenceItems: [],
+    judgmentSummary: '这条暂时只能当辅助证据，若竞价不扩散，不要升级成主线。',
+    judgmentMode: 'heuristic',
+  };
+
+  assert.equal(
+    readEventJudgmentSummary(detail, 'fallback sentence'),
+    '这条暂时只能当辅助证据，若竞价不扩散，不要升级成主线。'
+  );
+  assert.equal(readEventJudgmentSummary(event, 'fallback sentence'), 'fallback sentence');
 });

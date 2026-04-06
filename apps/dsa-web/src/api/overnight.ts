@@ -128,9 +128,11 @@ export const overnightApi = {
     }
   },
 
-  getEventDetail: async (eventId: string): Promise<OvernightEventDetail | null> => {
+  getEventDetail: async (eventId: string, briefId?: string): Promise<OvernightEventDetail | null> => {
     try {
-      const response = await apiClient.get<Record<string, unknown>>(`/api/v1/overnight/events/${eventId}`);
+      const response = await apiClient.get<Record<string, unknown>>(`/api/v1/overnight/events/${eventId}`, {
+        params: briefId ? { brief_id: briefId } : undefined,
+      });
       return toCamelCase<OvernightEventDetail>(response.data);
     } catch (error) {
       if (axios.isAxiosError(error) && error.response?.status === 404) {

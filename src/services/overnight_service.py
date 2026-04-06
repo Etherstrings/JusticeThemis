@@ -7,6 +7,7 @@ from dataclasses import replace
 import re
 from collections import Counter
 from typing import Any
+from urllib.parse import unquote, urlparse
 
 from src.config import get_config
 from src.overnight.brief_builder import MorningExecutiveBrief, RankedEvent, build_morning_brief
@@ -14,6 +15,7 @@ from src.overnight.runner import OvernightRunner
 from src.overnight.source_registry import build_default_source_registry
 from src.notification import NotificationService
 from src.repositories.overnight_repo import OvernightRepository
+from src.services.overnight_judgment_service import OvernightJudgmentService
 
 
 class OvernightBriefNotFoundError(LookupError):
@@ -81,9 +83,11 @@ class OvernightService:
         self,
         runner: OvernightRunner | None = None,
         repo: OvernightRepository | None = None,
+        judgment_service: OvernightJudgmentService | None = None,
     ) -> None:
         self.runner = runner or OvernightRunner()
         self.repo = repo or OvernightRepository()
+        self.judgment_service = judgment_service or OvernightJudgmentService()
 
     def get_latest_brief(self) -> MorningExecutiveBrief:
         latest = self.repo.get_latest_morning_brief()
@@ -106,10 +110,20 @@ class OvernightService:
             raise OvernightBriefNotFoundError(f"Overnight brief not found: {brief_id}")
         return self._upgrade_legacy_watchlist_shape(brief)
 
-    def get_event_detail(self, event_id: str) -> dict[str, Any]:
-        brief = self.get_latest_brief()
+    def get_event_detail(self, event_id: str, brief_id: str | None = None) -> dict[str, Any]:
+        brief = self.get_brief_by_id(brief_id) if brief_id else self.get_latest_brief()
         for event in brief.top_events:
             if str(event.get("event_id")) == event_id:
+                source_links = self._extract_event_source_links(brief, event_id, event)
+                evidence_items = self._build_event_evidence_items(
+                    event=event,
+                    source_links=source_links,
+                )
+                judgment = self.judgment_service.build_judgment(
+                    brief=brief,
+                    event=event,
+                    evidence_items=evidence_items,
+                )
                 return {
                     "event_id": event_id,
                     "priority_level": str(event.get("priority_level", "")),
@@ -117,6 +131,10 @@ class OvernightService:
                     "summary": str(event.get("summary", "")),
                     "why_it_matters": str(event.get("why_it_matters", "")),
                     "confidence": float(event.get("confidence", 0.0) or 0.0),
+                    "source_links": source_links,
+                    "evidence_items": evidence_items,
+                    "judgment_summary": judgment.summary,
+                    "judgment_mode": judgment.mode,
                 }
 
         raise OvernightEventNotFoundError(event_id)
@@ -609,6 +627,126 @@ class OvernightService:
         if not any(source.is_mission_critical for source in enabled_sources):
             gaps.append("当前没有启用 mission-critical 源")
         return gaps
+
+    def _extract_event_source_links(
+        self,
+        brief: MorningExecutiveBrief,
+        event_id: str,
+        event: dict[str, Any],
+    ) -> list[str]:
+        embedded_links = [
+            str(link).strip()
+            for link in (event.get("source_links", []) or [])
+            if str(link).strip()
+        ]
+        if embedded_links:
+            return embedded_links
+
+        for item in brief.primary_sources or []:
+            if str(item.get("event_id", "")).strip() != event_id:
+                continue
+            return [
+                str(link).strip()
+                for link in (item.get("links", []) or [])
+                if str(link).strip()
+            ]
+        return []
+
+    def _build_event_evidence_items(
+        self,
+        *,
+        event: dict[str, Any],
+        source_links: list[str],
+    ) -> list[dict[str, Any]]:
+        if not source_links:
+            return []
+
+        registry = build_default_source_registry()
+        fallback_headline = str(event.get("core_fact", "")).strip() or "Overnight evidence"
+
+        return [
+            {
+                "headline": self._derive_evidence_headline(link, fallback=fallback_headline),
+                "source_name": matched.display_name if matched is not None else self._read_hostname(link) or "未知来源",
+                "url": link,
+                "summary": self._build_evidence_summary(event, matched),
+                "source_type": self._derive_source_type(matched),
+                "coverage_tier": matched.coverage_tier if matched is not None else "",
+                "source_class": matched.source_class if matched is not None else "",
+            }
+            for link in source_links
+            for matched in [self._match_registry_source(link, registry)]
+        ]
+
+    def _match_registry_source(self, url: str, registry: list[Any]) -> Any | None:
+        hostname = self._normalize_hostname(self._read_hostname(url))
+        if not hostname:
+            return None
+
+        for source in registry:
+            entry_hostnames = [
+                self._normalize_hostname(self._read_hostname(entry_url))
+                for entry_url in source.entry_urls
+            ]
+            if hostname in entry_hostnames:
+                return source
+            if hostname.endswith("reuters.com") and "Reuters" in source.display_name:
+                return source
+            if hostname.endswith("apnews.com") and source.display_name.startswith("AP"):
+                return source
+            if hostname.endswith("cnbc.com") and source.display_name.startswith("CNBC"):
+                return source
+        return None
+
+    def _build_evidence_summary(self, event: dict[str, Any], matched_source: Any | None) -> str:
+        parts: list[str] = []
+        summary = str(event.get("summary", "")).strip()
+        why_it_matters = str(event.get("why_it_matters", "")).strip()
+        if summary:
+            parts.append(summary)
+        if why_it_matters and why_it_matters not in parts:
+            parts.append(why_it_matters)
+        if matched_source is not None and matched_source.coverage_focus:
+            parts.append(f"来源定位: {matched_source.coverage_focus}")
+
+        combined = " ".join(part for part in parts if part).strip()
+        if not combined:
+            return "当前只有链接证据，仍需结合开盘反馈确认。"
+        if len(combined) > 220:
+            return f"{combined[:217].rstrip()}..."
+        return combined
+
+    def _derive_evidence_headline(self, url: str, *, fallback: str) -> str:
+        try:
+            path = [part for part in urlparse(url).path.split("/") if part]
+            if not path:
+                return fallback
+            candidate = unquote(path[-1]).strip()
+            candidate = re.sub(r"\.[A-Za-z0-9]+$", "", candidate)
+            candidate = re.sub(r"[-_]+", " ", candidate).strip()
+            if len(candidate) < 6:
+                return fallback
+            return re.sub(r"\b\w", lambda match: match.group(0).upper(), candidate)
+        except Exception:
+            return fallback
+
+    def _derive_source_type(self, matched_source: Any | None) -> str:
+        if matched_source is None:
+            return "unknown"
+        if str(matched_source.coverage_tier).startswith("official") or str(matched_source.organization_type).startswith("official"):
+            return "official"
+        if matched_source.coverage_tier == "editorial_media" or matched_source.organization_type in {"wire_media", "editorial_media"}:
+            return "media"
+        return "unknown"
+
+    def _read_hostname(self, url: str) -> str:
+        try:
+            return urlparse(url).hostname or ""
+        except ValueError:
+            return ""
+
+    def _normalize_hostname(self, value: str) -> str:
+        return value.replace("www.", "").strip().lower()
 
     def submit_feedback(
         self,

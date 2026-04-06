@@ -9,7 +9,24 @@ export interface OvernightEventSummary {
   confidence: number;
 }
 
-export interface OvernightEventDetail extends OvernightEventSummary {}
+export interface OvernightEvidenceItem {
+  headline: string;
+  sourceName: string;
+  url: string;
+  summary: string;
+  sourceType: string;
+  coverageTier: string;
+  sourceClass: string;
+}
+
+export type OvernightJudgmentMode = 'model' | 'heuristic' | string;
+
+export interface OvernightEventDetail extends OvernightEventSummary {
+  sourceLinks: string[];
+  evidenceItems: OvernightEvidenceItem[];
+  judgmentSummary: string;
+  judgmentMode: OvernightJudgmentMode;
+}
 
 export interface OvernightBoardItem {
   [key: string]: unknown;

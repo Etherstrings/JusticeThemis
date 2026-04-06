@@ -12,6 +12,7 @@ import type {
   OvernightBoardItem,
   OvernightBrief,
   OvernightBriefHistoryItem,
+  OvernightEventDetail,
   OvernightEventSummary,
   OvernightHealthResponse,
   OvernightPrimarySourceGroup,
@@ -25,7 +26,7 @@ import {
 } from '../utils/overnightView';
 import { buildEventDecisionLens, getEvidenceBadgeVariant } from '../utils/overnightDecision';
 import { groupSourcesByCoverageTier, readCoverageTierCount } from '../utils/overnightSourceCoverage';
-import { buildCapturedNewsItems } from '../utils/overnightSourceEvidence';
+import { buildCapturedNewsItems, readEventJudgmentSummary } from '../utils/overnightSourceEvidence';
 
 function priorityVariant(priorityLevel?: string): 'danger' | 'warning' | 'info' | 'default' {
   switch ((priorityLevel || '').toUpperCase()) {
@@ -469,6 +470,7 @@ const OvernightBriefPage: React.FC = () => {
   const [historyTotal, setHistoryTotal] = useState(0);
   const [sources, setSources] = useState<OvernightSourceListResponse | null>(null);
   const [health, setHealth] = useState<OvernightHealthResponse | null>(null);
+  const [selectedEventDetail, setSelectedEventDetail] = useState<OvernightEventDetail | null>(null);
   const [isOperationsLoading, setIsOperationsLoading] = useState(true);
   const [operationsError, setOperationsError] = useState<string | null>(null);
 
@@ -502,6 +504,7 @@ const OvernightBriefPage: React.FC = () => {
     } catch (error) {
       setBrief(null);
       setSelectedEventId(null);
+      setSelectedEventDetail(null);
       if (error instanceof OvernightBriefUnavailableError) {
         setEmptyMessage(error.message);
         setHistoryItems([]);
@@ -542,6 +545,35 @@ const OvernightBriefPage: React.FC = () => {
     void loadOperations();
   }, [briefId]);
 
+  useEffect(() => {
+    if (!brief || !selectedEventId) {
+      setSelectedEventDetail(null);
+      return;
+    }
+
+    let isCancelled = false;
+    setSelectedEventDetail(null);
+
+    const loadSelectedEventDetail = async () => {
+      try {
+        const detail = await overnightApi.getEventDetail(selectedEventId, brief.briefId);
+        if (!isCancelled) {
+          setSelectedEventDetail(detail);
+        }
+      } catch {
+        if (!isCancelled) {
+          setSelectedEventDetail(null);
+        }
+      }
+    };
+
+    void loadSelectedEventDetail();
+
+    return () => {
+      isCancelled = true;
+    };
+  }, [brief, selectedEventId]);
+
   const selectedEvent = useMemo<OvernightEventSummary | null>(() => {
     if (!brief || !selectedEventId) return null;
     return brief.topEvents.find((item) => item.eventId === selectedEventId) || null;
@@ -563,7 +595,7 @@ const OvernightBriefPage: React.FC = () => {
     );
   }, [brief]);
 
-  const detailToRender = selectedEvent;
+  const detailToRender = selectedEventDetail || selectedEvent;
   const selectedDecision = detailToRender ? eventDecisionMap.get(detailToRender.eventId) || null : null;
   const capturedNewsItems = useMemo(() => {
     if (!detailToRender || !selectedSources) {
@@ -571,6 +603,12 @@ const OvernightBriefPage: React.FC = () => {
     }
     return buildCapturedNewsItems(detailToRender, selectedSources, sources?.items || []);
   }, [detailToRender, selectedSources, sources]);
+  const judgmentSummary = detailToRender
+    ? readEventJudgmentSummary(
+        detailToRender,
+        selectedDecision?.ashareLens.actionBody || '先看受益方向和跨资产反馈是否共振，没有确认前别急着升级成主线。'
+      )
+    : '';
   const totalHistoryPages = Math.max(1, Math.ceil(historyTotal / historyPageSize));
 
   const handleHistoryPageChange = (page: number) => {
@@ -729,6 +767,12 @@ const OvernightBriefPage: React.FC = () => {
                       <div className="mt-1 text-sm leading-6 text-secondary">
                         可能涨价: {selectedDecision.ashareLens.pricePressureAreas.join(' / ')}
                       </div>
+                    </div>
+                  ) : null}
+                  {judgmentSummary ? (
+                    <div className="rounded-2xl border border-white/6 bg-white/[0.02] px-4 py-3">
+                      <div className="text-xs uppercase tracking-[0.18em] text-muted">一句判断</div>
+                      <div className="mt-2 text-sm leading-6 text-white/90">{judgmentSummary}</div>
                     </div>
                   ) : null}
                   <div className="flex flex-wrap gap-2">
