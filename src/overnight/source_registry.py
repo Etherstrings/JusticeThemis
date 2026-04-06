@@ -12,7 +12,10 @@ _DEFAULT_SOURCES: tuple[SourceDefinition, ...] = (
         organization_type="official_policy",
         source_class="policy",
         entry_type="section_page",
-        entry_urls=("https://www.whitehouse.gov/news/",),
+        entry_urls=(
+            "https://www.whitehouse.gov/news/",
+            "https://www.whitehouse.gov/briefing-room/",
+        ),
         priority=100,
         poll_interval_seconds=300,
         is_mission_critical=True,
@@ -40,7 +43,10 @@ _DEFAULT_SOURCES: tuple[SourceDefinition, ...] = (
         organization_type="official_policy",
         source_class="policy",
         entry_type="section_page",
-        entry_urls=("https://ustr.gov/about-us/policy-offices/press-office/press-releases",),
+        entry_urls=(
+            "https://ustr.gov/about-us/policy-offices/press-office/press-releases",
+            "https://ustr.gov/about-us/policy-offices/press-office/speeches-and-remarks",
+        ),
         priority=100,
         poll_interval_seconds=300,
         is_mission_critical=True,

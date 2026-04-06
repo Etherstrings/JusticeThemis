@@ -5,11 +5,15 @@ from __future__ import annotations
 
 from datetime import datetime
 from email.utils import parsedate_to_datetime
+import logging
 from urllib.parse import urljoin
 
 import feedparser
 
 from src.overnight.types import SourceCandidate, SourceDefinition
+
+
+logger = logging.getLogger(__name__)
 
 
 def _fetch_payload(http_client: object, url: str) -> str:
@@ -48,30 +52,41 @@ class FeedCollector:
         if not source.entry_urls:
             return []
 
-        feed_text = _fetch_payload(self._http_client, source.entry_urls[0])
-        parsed_feed = feedparser.parse(feed_text)
-
         candidates: list[SourceCandidate] = []
-        for entry in parsed_feed.entries:
-            link = str(entry.get("link", "")).strip()
-            title = str(entry.get("title", "")).strip()
-            if not link or not title:
+        seen_urls: set[str] = set()
+        for entry_url in source.entry_urls:
+            try:
+                feed_text = _fetch_payload(self._http_client, entry_url)
+                parsed_feed = feedparser.parse(feed_text)
+            except Exception as exc:
+                logger.warning("Failed to fetch feed entry url %s for %s: %s", entry_url, source.source_id, exc)
                 continue
 
-            summary = str(entry.get("summary", "")).strip()
-            raw_published = str(entry.get("published", "") or entry.get("updated", "")).strip()
-            published_at = _normalize_feed_datetime(raw_published) if raw_published else None
-            candidates.append(
-                SourceCandidate(
-                    candidate_type="feed_item",
-                    candidate_url=urljoin(source.entry_urls[0], link),
-                    candidate_title=title,
-                    candidate_summary=summary,
-                    candidate_published_at=published_at,
-                    candidate_section=source.display_name,
-                    candidate_tags=(source.source_id,),
-                    needs_article_fetch=True,
-                    needs_attachment_fetch=False,
+            for entry in parsed_feed.entries:
+                link = str(entry.get("link", "")).strip()
+                title = str(entry.get("title", "")).strip()
+                if not link or not title:
+                    continue
+
+                candidate_url = urljoin(entry_url, link)
+                if candidate_url in seen_urls:
+                    continue
+
+                seen_urls.add(candidate_url)
+                summary = str(entry.get("summary", "")).strip()
+                raw_published = str(entry.get("published", "") or entry.get("updated", "")).strip()
+                published_at = _normalize_feed_datetime(raw_published) if raw_published else None
+                candidates.append(
+                    SourceCandidate(
+                        candidate_type="feed_item",
+                        candidate_url=candidate_url,
+                        candidate_title=title,
+                        candidate_summary=summary,
+                        candidate_published_at=published_at,
+                        candidate_section=source.display_name,
+                        candidate_tags=(source.source_id,),
+                        needs_article_fetch=True,
+                        needs_attachment_fetch=False,
+                    )
                 )
-            )
         return candidates

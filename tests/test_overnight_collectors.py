@@ -33,6 +33,29 @@ class InlineFixtureClient:
         return self.html
 
 
+class RoutingInlineFixtureClient:
+    def __init__(self, routes: dict[str, str]):
+        self.routes = routes
+
+    def fetch(self, url: str) -> str:
+        if url not in self.routes:
+            raise AssertionError(f"Unexpected fixture url: {url}")
+        return self.routes[url]
+
+
+class FaultTolerantFixtureClient:
+    def __init__(self, responses: dict[str, str], failing_urls: set[str]):
+        self.responses = responses
+        self.failing_urls = failing_urls
+
+    def fetch(self, url: str) -> str:
+        if url in self.failing_urls:
+            raise RuntimeError(f"boom: {url}")
+        if url not in self.responses:
+            raise AssertionError(f"Unexpected fixture url: {url}")
+        return self.responses[url]
+
+
 def _source_by_id(source_id: str) -> SourceDefinition:
     return next(source for source in build_default_source_registry() if source.source_id == source_id)
 
@@ -76,6 +99,63 @@ def test_feed_collector_resolves_relative_links_against_feed_url() -> None:
     assert candidates[0].candidate_url == "https://www.eia.gov/pressroom/releases/press585.php"
 
 
+def test_feed_collector_merges_multiple_entry_urls() -> None:
+    first_feed = """
+    <rss version="2.0"><channel><item><title>First item</title><link>https://example.com/first</link></item></channel></rss>
+    """
+    second_feed = """
+    <rss version="2.0"><channel><item><title>Second item</title><link>https://example.com/second</link></item></channel></rss>
+    """
+    source = SourceDefinition(
+        source_id="test_feed",
+        display_name="Test Feed",
+        organization_type="official_policy",
+        source_class="policy",
+        entry_type="rss",
+        entry_urls=("https://example.com/feed-a.xml", "https://example.com/feed-b.xml"),
+        priority=1,
+        poll_interval_seconds=300,
+    )
+    collector = FeedCollector(
+        http_client=RoutingInlineFixtureClient(
+            {
+                "https://example.com/feed-a.xml": first_feed,
+                "https://example.com/feed-b.xml": second_feed,
+            }
+        )
+    )
+
+    candidates = collector.collect(source)
+
+    assert [candidate.candidate_title for candidate in candidates] == ["First item", "Second item"]
+
+
+def test_feed_collector_skips_failed_entry_url_and_uses_later_feed() -> None:
+    second_feed = """
+    <rss version="2.0"><channel><item><title>Second item</title><link>https://example.com/second</link></item></channel></rss>
+    """
+    source = SourceDefinition(
+        source_id="test_feed",
+        display_name="Test Feed",
+        organization_type="official_policy",
+        source_class="policy",
+        entry_type="rss",
+        entry_urls=("https://example.com/feed-a.xml", "https://example.com/feed-b.xml"),
+        priority=1,
+        poll_interval_seconds=300,
+    )
+    collector = FeedCollector(
+        http_client=FaultTolerantFixtureClient(
+            responses={"https://example.com/feed-b.xml": second_feed},
+            failing_urls={"https://example.com/feed-a.xml"},
+        )
+    )
+
+    candidates = collector.collect(source)
+
+    assert [candidate.candidate_title for candidate in candidates] == ["Second item"]
+
+
 def test_section_collector_extracts_whitehouse_cards() -> None:
     collector = SectionCollector(http_client=FixtureClient(FIXTURE_DIR / "whitehouse_news.html"))
     candidates = collector.collect(_source_by_id("whitehouse_news"))
@@ -106,6 +186,66 @@ def test_section_collector_extracts_reuters_topic_cards() -> None:
     ]
     assert [candidate.candidate_published_at for candidate in candidates] == ["2026-04-04", "2026-04-03"]
     assert [candidate.needs_article_fetch for candidate in candidates] == [True, True]
+
+
+def test_section_collector_merges_multiple_entry_urls() -> None:
+    first_page = """
+    <html><body><h3><a href="https://example.com/article/one">First article from first page</a></h3></body></html>
+    """
+    second_page = """
+    <html><body><h3><a href="https://example.com/article/two">Second article from second page</a></h3></body></html>
+    """
+    source = SourceDefinition(
+        source_id="test_section",
+        display_name="Test Section",
+        organization_type="wire_media",
+        source_class="market",
+        entry_type="section_page",
+        entry_urls=("https://example.com/page-a", "https://example.com/page-b"),
+        priority=1,
+        poll_interval_seconds=300,
+    )
+    collector = SectionCollector(
+        http_client=RoutingInlineFixtureClient(
+            {
+                "https://example.com/page-a": first_page,
+                "https://example.com/page-b": second_page,
+            }
+        )
+    )
+
+    candidates = collector.collect(source)
+
+    assert [candidate.candidate_title for candidate in candidates] == [
+        "First article from first page",
+        "Second article from second page",
+    ]
+
+
+def test_section_collector_skips_failed_entry_url_and_uses_later_page() -> None:
+    second_page = """
+    <html><body><h3><a href="https://example.com/article/two">Second article from second page</a></h3></body></html>
+    """
+    source = SourceDefinition(
+        source_id="test_section",
+        display_name="Test Section",
+        organization_type="wire_media",
+        source_class="market",
+        entry_type="section_page",
+        entry_urls=("https://example.com/page-a", "https://example.com/page-b"),
+        priority=1,
+        poll_interval_seconds=300,
+    )
+    collector = SectionCollector(
+        http_client=FaultTolerantFixtureClient(
+            responses={"https://example.com/page-b": second_page},
+            failing_urls={"https://example.com/page-a"},
+        )
+    )
+
+    candidates = collector.collect(source)
+
+    assert [candidate.candidate_title for candidate in candidates] == ["Second article from second page"]
 
 
 def test_section_collector_extracts_ustr_field_content_links() -> None:

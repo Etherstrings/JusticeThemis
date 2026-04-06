@@ -58,7 +58,9 @@ class OvernightSourceCaptureService:
         collected_sources = 0
         collected_items = 0
 
-        for source in self._select_sources(max_sources=max_sources):
+        for source in self._select_sources(max_sources=max(len(self.registry), max_sources)):
+            if collected_sources >= max(1, max_sources):
+                break
             candidates = self._collect_source_candidates(source)[:max(1, limit_per_source)]
             if not candidates:
                 continue

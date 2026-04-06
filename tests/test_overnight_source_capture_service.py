@@ -11,7 +11,7 @@ import pytest
 
 from src.config import Config
 from src.overnight.source_registry import build_default_source_registry
-from src.overnight.types import SourceDefinition
+from src.overnight.types import SourceCandidate, SourceDefinition
 from src.repositories.overnight_repo import OvernightRepository
 from src.services.overnight_source_capture_service import OvernightSourceCaptureService
 from src.storage import DatabaseManager
@@ -124,3 +124,68 @@ def test_source_capture_service_selects_highest_priority_sources_first(db_manage
     selected = service._select_sources(max_sources=2)
 
     assert [source.source_id for source in selected] == ["high_priority", "medium_priority"]
+
+
+def test_source_capture_service_keeps_going_until_it_fills_successful_sources(db_manager: DatabaseManager) -> None:
+    repo = OvernightRepository(db_manager)
+    registry = [
+        SourceDefinition(
+            source_id="first_empty",
+            display_name="First Empty",
+            organization_type="official_policy",
+            source_class="policy",
+            entry_type="rss",
+            entry_urls=("https://example.com/first.xml",),
+            priority=100,
+            poll_interval_seconds=300,
+        ),
+        SourceDefinition(
+            source_id="second_working",
+            display_name="Second Working",
+            organization_type="official_policy",
+            source_class="policy",
+            entry_type="rss",
+            entry_urls=("https://example.com/second.xml",),
+            priority=90,
+            poll_interval_seconds=300,
+        ),
+        SourceDefinition(
+            source_id="third_working",
+            display_name="Third Working",
+            organization_type="official_policy",
+            source_class="policy",
+            entry_type="rss",
+            entry_urls=("https://example.com/third.xml",),
+            priority=80,
+            poll_interval_seconds=300,
+        ),
+    ]
+    service = OvernightSourceCaptureService(repo=repo, registry=registry, http_client=RoutingFixtureClient({}))
+
+    candidate = SourceCandidate(
+        candidate_type="feed_item",
+        candidate_url="https://example.com/item-1",
+        candidate_title="Sample title",
+        candidate_summary="Sample summary",
+        needs_article_fetch=False,
+    )
+
+    captured_ids: list[str] = []
+
+    def fake_collect(source: SourceDefinition):
+        if source.source_id == "first_empty":
+            return []
+        return [candidate]
+
+    def fake_persist(source: SourceDefinition, _candidate: SourceCandidate):
+        captured_ids.append(source.source_id)
+        return object()
+
+    service._collect_source_candidates = fake_collect  # type: ignore[method-assign]
+    service._persist_candidate = fake_persist  # type: ignore[method-assign]
+    service.list_recent_items = lambda limit=20: {"total": len(captured_ids), "items": []}  # type: ignore[assignment]
+
+    result = service.refresh(limit_per_source=1, max_sources=2, recent_limit=5)
+
+    assert result["collected_sources"] == 2
+    assert captured_ids == ["second_working", "third_working"]

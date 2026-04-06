@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 from datetime import datetime
+import logging
 import re
 from urllib.parse import urljoin, urlsplit
 
@@ -11,6 +12,9 @@ from bs4 import BeautifulSoup
 from bs4.element import Tag
 
 from src.overnight.types import SourceCandidate, SourceDefinition
+
+
+logger = logging.getLogger(__name__)
 
 
 _GENERIC_ANCHOR_SELECTORS = (
@@ -105,26 +109,30 @@ class SectionCollector:
         if not source.entry_urls:
             return []
 
-        page_url = source.entry_urls[0]
-        html = _fetch_payload(self._http_client, page_url)
-        soup = BeautifulSoup(html, "lxml")
-
-        cards = soup.select("#news-feed article.news-card, #topic-list article.topic-card")
         candidates: list[SourceCandidate] = []
         seen_urls: set[str] = set()
-        for card in cards:
-            candidate = _build_card_candidate(card=card, page_url=page_url, source=source)
-            if candidate is None or candidate.candidate_url in seen_urls:
+        for page_url in source.entry_urls:
+            try:
+                html = _fetch_payload(self._http_client, page_url)
+                soup = BeautifulSoup(html, "lxml")
+            except Exception as exc:
+                logger.warning("Failed to fetch section entry url %s for %s: %s", page_url, source.source_id, exc)
                 continue
-            seen_urls.add(candidate.candidate_url)
-            candidates.append(candidate)
 
-        for anchor in _iter_generic_candidate_links(soup):
-            candidate = _build_generic_candidate(anchor=anchor, page_url=page_url, source=source)
-            if candidate is None or candidate.candidate_url in seen_urls:
-                continue
-            seen_urls.add(candidate.candidate_url)
-            candidates.append(candidate)
+            cards = soup.select("#news-feed article.news-card, #topic-list article.topic-card")
+            for card in cards:
+                candidate = _build_card_candidate(card=card, page_url=page_url, source=source)
+                if candidate is None or candidate.candidate_url in seen_urls:
+                    continue
+                seen_urls.add(candidate.candidate_url)
+                candidates.append(candidate)
+
+            for anchor in _iter_generic_candidate_links(soup):
+                candidate = _build_generic_candidate(anchor=anchor, page_url=page_url, source=source)
+                if candidate is None or candidate.candidate_url in seen_urls:
+                    continue
+                seen_urls.add(candidate.candidate_url)
+                candidates.append(candidate)
 
         return candidates
 
