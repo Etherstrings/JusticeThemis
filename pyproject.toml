@@ -1,28 +1,47 @@
-[tool.black]
-line-length = 120
-target-version = ['py310', 'py311', 'py312']
-include = '\.pyi?$'
-exclude = '''
-/(
-    \.git
-    | \.hg
-    | \.mypy_cache
-    | \.tox
-    | \.venv
-    | venv
-    | _build
-    | buck-out
-    | build
-    | dist
-    | __pycache__
-)/
-'''
+[build-system]
+requires = ["setuptools>=69"]
+build-backend = "setuptools.build_meta"
 
-[tool.isort]
-profile = "black"
-line_length = 120
-skip = [".git", "__pycache__", ".env", "venv", ".venv"]
+[project]
+name = "justice-themis"
+version = "0.1.0"
+description = "JusticeThemis: standalone authoritative overnight market interpretation and LLM handoff service"
+requires-python = ">=3.12"
+dependencies = [
+  "beautifulsoup4>=4.13.0",
+  "feedparser>=6.0.11",
+  "fastapi>=0.116.0",
+  "lxml>=5.4.0",
+  "requests>=2.32.0",
+  "uvicorn>=0.35.0",
+]
 
-[tool.bandit]
-exclude_dirs = ["tests", "test_*.py"]
-skips = ["B101"]  # assert 语句在测试中是允许的
+[project.scripts]
+justice-themis-pipeline = "app.pipeline:main"
+justice-themis-launchd-template = "app.schedule_template:main"
+overnight-news-pipeline = "app.pipeline:main"
+overnight-news-launchd-template = "app.schedule_template:main"
+
+[project.optional-dependencies]
+dev = [
+  "httpx>=0.28.0",
+  "pytest>=8.4.0",
+]
+
+[dependency-groups]
+dev = [
+  "httpx>=0.28.0",
+  "pytest>=8.4.0",
+]
+
+[tool.setuptools]
+include-package-data = true
+
+[tool.setuptools.packages.find]
+include = ["app*"]
+
+[tool.setuptools.package-data]
+app = ["ui/*.html", "ui/*.css", "ui/*.js"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

@@ -1,84 +1,25 @@
-# 环境变量文件（包含敏感信息，禁止提交）
-.env
-.env.*
-*.env
-*.env.local
-.env.*.local
-
-# 测试文件（可能包含敏感配置）
-# 仅忽略仓库根目录下的临时 test_*.py 脚本；tests/ 目录下的单元测试需要纳入版本控制。
-/test_*.py
-!test_env.py
-
-# Python
+# Local environments and caches
+.venv/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
 __pycache__/
 *.py[cod]
-*$py.class
-*.so
-.Python
-build/
-develop-eggs/
-dist/
-downloads/
-eggs/
-.eggs/
-lib/
-lib64/
-parts/
-sdist/
-var/
-wheels/
+
+# Packaging artifacts
 *.egg-info/
-.installed.cfg
-*.egg
+dist/
+build/
 
-# 虚拟环境
-venv/
-ENV/
-env/
-.venv/
-
-# IDE
-.idea/
-.vscode/
-*.swp
-*.swo
-*~
-.cursorrules
-
-# 数据和日志
+# Local runtime data and exports
 data/
-logs/
-reports/
 output/
 *.db
 *.sqlite
 *.sqlite3
-uv.lock
+*.log
 
-# 系统文件
-.DS_Store
-Thumbs.db
-
-# 测试
-.pytest_cache/
+# Coverage and editor noise
 .coverage
 htmlcov/
-
-local/
-
-run.sh
-
-verify_*.py
-
-# ignore claude files
-.claude/
-CLAUDE.md
-
-# ignore static files
-static/
-/apps/dsa-desktop/dist/
-/apps/dsa-desktop/node_modules/
-
-# git worktrees
-.worktrees/
+.DS_Store

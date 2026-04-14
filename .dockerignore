@@ -1,30 +1,31 @@
-# 忽略 Python 缓存
+# Local environments and caches
+.venv/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
 __pycache__/
 *.py[cod]
-*$py.class
-*.so
 
-# 忽略虚拟环境
-venv/
-.venv/
-env/
-.env.local
+# Packaging artifacts
+*.egg-info/
+dist/
+build/
 
-# 忽略 IDE
-.idea/
-.vscode/
-*.swp
-*.swo
+# Local runtime data and exports
+data/
+output/
+*.db
+*.sqlite
+*.sqlite3
+*.log
 
-# 忽略数据文件（可选，如果想持久化就注释掉）
-# data/
-# logs/
-# reports/
-
-# 忽略测试文件
-test_*.py
-*_test.py
-
-# 忽略文档
-*.md
-!README.md
+# Non-runtime repository content
+.git/
+.github/
+.codex/
+docs/
+openspec/
+tests/
+.coverage
+htmlcov/
+.DS_Store

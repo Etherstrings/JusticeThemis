@@ -1,0 +1,13 @@
+services:
+  overnight-news-handoff:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    ports:
+      - "8000:8000"
+    env_file:
+      - .env
+    environment:
+      OVERNIGHT_NEWS_DB_PATH: /app/data/overnight-news-handoff.db
+    volumes:
+      - ./data:/app/data

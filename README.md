@@ -1,188 +1,244 @@
 # JusticeThemis
 
-A-share overnight decision workspace translating overseas financial and political news into pre-open actions.
+[中文](README.zh.md)
 
-`JusticeThemis` is built for a China-based user who wakes up in the morning and wants four answers fast:
+This is the default bootstrap entrypoint for the standalone `JusticeThemis` repository. For the Chinese bootstrap companion, see [README.zh.md](README.zh.md).
 
-1. What happened overseas overnight?
-2. Which A-share directions may benefit?
-3. Which chains may face price pressure?
-4. What should be watched before the opening auction?
+JusticeThemis is a standalone overnight international-news capture, U.S. market-close snapshot, fixed China-morning analysis cache, and downstream LLM/MMU export service.
 
-## What It Is
+It is positioned as a result-first overnight market interpretation engine for the China-morning workflow, not just a downstream handoff tool.
 
-This repo packages the overnight product into a standalone workspace instead of treating it as a side feature.
+<!-- readme-parity:what-it-does -->
+## What It Does
 
-Core product surfaces:
+- Captures a curated overnight source pool into SQLite
+- Builds one U.S. market-close snapshot for the analysis date
+- Generates fixed `free` and `premium` daily analysis reports
+- Exports prompt bundles and MMU handoff payloads for downstream model use
+- Exposes read APIs plus protected mutation and readiness routes
 
-- `/overnight`: main overnight brief
-- `/overnight/opening`: pre-open action board
-- `/overnight/changes`: latest-vs-previous delta comparison
-- `/overnight/playbook`: opening playbook
-- `/overnight/history`: event and topic history workspace
-- `/overnight/topics/:topicKey`: topic views
-- `/overnight/review`: editorial review queue
-- `/overnight/events/:eventId`: single-event execution desk
+<!-- readme-parity:runtime-contract -->
+## Runtime Contract
 
-## Product Model
+Configuration precedence is:
 
-The product is not designed as a generic news feed.
-It turns raw overnight inputs into a compact decision surface:
+1. process environment
+2. explicit env-file path when a CLI supports `--env-file`
+3. project-local `.env.local`
+4. project-local `.env`
 
-- top events ranked by priority and confidence
-- A-share focus areas
-- avoid areas
-- likely price-pressure chains
-- confirmation flags
-- pre-market action lanes
-- single-event trading context
-- historical fermentation and previous-day shift
-- same-brief related-chain links
+The app no longer reads env files from other repositories by default.
 
-Action lanes:
+<!-- readme-parity:legacy-compatibility-mapping -->
+## Legacy compatibility mapping
 
-- `act-now`
-- `watch-open`
-- `wait-confirm`
-- `de-risk`
+- `JusticeThemis`: canonical product identity for docs, API metadata, health surfaces, and newly generated operator artifacts
+- `overnight-news-handoff`: legacy project identifier that may still appear in historical docs or compatibility surfaces
+- `OVERNIGHT_*`: current supported runtime environment-variable contract in this soft-rename phase
+- `overnight-news-pipeline` / `overnight-news-launchd-template`: legacy CLI aliases that remain supported for compatibility
 
-## Current Shipped State
+<!-- readme-parity:environment-variables -->
+## Environment Variables
 
-The current repo includes:
+See [.env.example](/Users/boyuewu/Documents/Projects/AIProjects/overnight-news-handoff/.env.example).
 
-- multi-page overnight frontend workspace
-- overnight brief API and storage
-- delta detection between consecutive briefs
-- event history aggregation
-- topic history aggregation
-- feedback queue and review workflow
-- A-share translation logic
-- event freshness and linkage logic
+Important variables:
 
-Release summary:
+- `OVERNIGHT_PREMIUM_API_KEY`: required for premium read routes
+- `OVERNIGHT_ADMIN_API_KEY`: required for refresh/generate/readyz routes unless unsafe mode is enabled
+- `OVERNIGHT_ALLOW_UNSAFE_ADMIN`: local-only escape hatch for development; do not enable in production
+- `IFIND_REFRESH_TOKEN`: strongly recommended for complete U.S. market snapshot coverage; without it the service may degrade to Treasury-only partial market snapshots when Yahoo Finance rate-limits
+- `ALPHA_VANTAGE_API_KEY`: optional premium ticker-enrichment provider for regime/mainline-linked U.S. symbols and ETFs
+- `OVERNIGHT_NEWS_DB_PATH`: optional SQLite path override
 
-- [JusticeThemis Release Notes](docs/releases/2026-04-06-justice-themis.md)
+The runtime env prefix remains `OVERNIGHT_*` for compatibility in this phase. There is no required env migration to a `JUSTICE_THEMIS_*` prefix yet.
 
-Design and planning history:
+<!-- readme-parity:current-output-layers -->
+## Current Output Layers
 
-- [Overnight Design Spec](docs/superpowers/specs/2026-04-05-overnight-intelligence-morning-brief-design.md)
-- [Overnight Implementation Plan](docs/superpowers/plans/2026-04-05-overnight-intelligence-morning-brief.md)
+- `market_snapshot` remains the assembled board contract and now carries additive `capture_summary.provider_hits`, tiered missing-symbol diagnostics, freshness counts, `market_regimes`, and suppressed regime evaluations
+- `daily_analysis` keeps the same free/premium top-level shape while adding additive `market_regimes`, `secondary_event_groups`, `ticker_enrichments`, and `enrichment_summary`
+- `MMU handoff` now carries confirmed mainlines, additive regime/secondary context, and premium ticker enrichments without breaking current prompt payloads
+- `/api/v1/dashboard` exposes confirmed mainlines separately from `market_regimes` and `secondary_event_groups`
 
-## Quick Start
+<!-- readme-parity:local-startup -->
+## Local Startup
 
-### 1. Clone
+Install dependencies:
 
 ```bash
-git clone https://github.com/Etherstrings/JusticeThemis.git
-cd JusticeThemis
+uv sync --dev
 ```
 
-### 2. Install Python dependencies
-
-Use Python `3.12` or newer for the local environment.
+Canonical local verification command:
 
 ```bash
-uv venv --python 3.12 .venv
-source .venv/bin/activate
-pip install -r requirements.txt
+uv run pytest -q
 ```
 
-### 3. Install frontend dependencies
+Run the API server:
 
 ```bash
-cd apps/dsa-web
-npm install
-cd ../..
+uv run python -m uvicorn app.main:app --host 127.0.0.1 --port 8000
 ```
 
-### 4. Configure environment
-
-Copy and edit your environment file if needed:
+Run the fixed pipeline once:
 
 ```bash
-cp .env.example .env
+uv run justice-themis-pipeline --analysis-date 2026-04-10
 ```
 
-Recommended areas to configure for the overnight product:
-
-- upstream model/API keys
-- overnight source access
-- proxy settings if overseas sources require it
-- delivery channels if you want notifications
-
-### 5. Run the app
+Legacy compatibility alias still works:
 
 ```bash
-python main.py --webui-only
+uv run overnight-news-pipeline --analysis-date 2026-04-10
 ```
 
-Or run with the broader service mode:
+<!-- readme-parity:canonical-upstream-and-sync -->
+## Canonical Upstream And Sync
+
+Canonical upstream for version-control history is the remote GitHub repository `Etherstrings/JusticeThemis` on branch `main`.
+
+This local directory is the current standalone implementation source, but it is not itself a Git worktree. Repository convergence therefore MUST happen in an isolated Git-backed convergence workspace cloned from the canonical upstream, not by running `git init` or ad-hoc merge commands inside this directory.
+
+Current convergence prerequisites are documented in [docs/technical/2026-04-14-remote-repository-convergence.md](/Users/boyuewu/Documents/Projects/AIProjects/overnight-news-handoff/docs/technical/2026-04-14-remote-repository-convergence.md). Use that audit before replacing remote paths, adjusting workflows, or proposing a sync branch for review.
+
+The post-sync verification contract is:
+
+- bootstrap dependencies with `uv sync --dev`
+- start the service with `uv run python -m uvicorn app.main:app --host 127.0.0.1 --port 8000`
+- verify `GET /healthz`, authenticated `GET /readyz`, and `GET /api/v1/news?limit=3`
+- run the canonical deterministic regression command `uv run pytest -q`
+
+The current merge-ready branch plan and review notes are recorded in [docs/technical/2026-04-14-convergence-review-summary.md](/Users/boyuewu/Documents/Projects/AIProjects/overnight-news-handoff/docs/technical/2026-04-14-convergence-review-summary.md).
+
+<!-- readme-parity:repository-hygiene -->
+## Repository Hygiene
+
+This repository now treats source-owned content and generated local artifacts as two different classes of files.
+
+<!-- readme-parity:source-owned-paths -->
+### Source-owned paths
+
+- `app/`
+- `tests/`
+- `docs/`
+- `openspec/`
+- `.github/`
+- root configuration files such as `pyproject.toml`, `Dockerfile`, `compose.yml`, `.env.example`, and `README.md`
+
+<!-- readme-parity:generated-local-artifacts -->
+### Generated local artifacts
+
+- `.venv/`, `.pytest_cache/`, and `__pycache__/`
+- `*.egg-info/`
+- `data/` runtime databases
+- `output/` exported pipeline deliverables
+- local logs, coverage outputs, and similar machine-generated files
+
+These generated files are reproducible local artifacts. They are not part of the intended source-owned working set and are excluded by the repository `.gitignore` and `.dockerignore` baselines.
+
+<!-- readme-parity:verification-baseline -->
+### Verification baseline
+
+- Bootstrap dependencies with `uv sync --dev`
+- Run the canonical deterministic regression command with `uv run pytest -q`
+- The repository CI baseline runs the same deterministic test command and does not require live provider credentials or premium/admin secrets
+
+The built-in `/ui` operator panel now stores an admin key in browser local storage only and sends it on `/refresh`. Leave the field blank if you want a read-only view.
+
+<!-- readme-parity:auth-surfaces -->
+## Auth Surfaces
+
+Public read routes:
+
+- `GET /healthz`
+- `GET /items`
+- `GET /handoff`
+- `GET /api/v1/dashboard`
+- `GET /api/v1/news`
+- `GET /api/v1/news/{item_id}`
+- `GET /api/v1/sources`
+- `GET /api/v1/pipeline/blueprint`
+- `GET /api/v1/market/us/daily`
+- `GET /api/v1/analysis/daily?tier=free`
+- `GET /api/v1/analysis/daily/versions?tier=free`
+- `GET /api/v1/analysis/daily/prompt?tier=free`
+- `GET /api/v1/mmu/handoff?tier=free`
+
+Premium read routes require `X-Premium-Access-Key`:
+
+- `GET /api/v1/analysis/daily?tier=premium`
+- `GET /api/v1/analysis/daily/versions?tier=premium`
+- `GET /api/v1/analysis/daily/prompt?tier=premium`
+- `GET /api/v1/mmu/handoff?tier=premium`
+
+Admin routes require `X-Admin-Access-Key` unless `OVERNIGHT_ALLOW_UNSAFE_ADMIN=true`:
+
+- `POST /refresh`
+- `POST /api/v1/market/us/refresh`
+- `POST /api/v1/analysis/daily/generate`
+- `GET /readyz`
+
+<!-- readme-parity:smoke-check -->
+## Smoke Check
+
+Start the API, then run:
 
 ```bash
-python main.py --webui
+curl -s http://127.0.0.1:8000/healthz
+curl -s -H "X-Admin-Access-Key: $OVERNIGHT_ADMIN_API_KEY" http://127.0.0.1:8000/readyz
+curl -s http://127.0.0.1:8000/api/v1/news?limit=3
 ```
 
-Frontend-only build:
+Expected:
+
+- `healthz` returns `{"status":"ok","service":"JusticeThemis"}`
+- `readyz` returns sanitized runtime state, source-registry counts, and provider availability for search, market snapshot, and ticker enrichment
+- `/api/v1/news` returns JSON even when the dataset is empty
+
+For a full CLI smoke, run:
 
 ```bash
-npm --prefix apps/dsa-web run build
+uv run python -m app.pipeline --analysis-date 2026-04-11 --output-path /tmp/justice-themis-summary.json
 ```
 
-## Key Routes
+If `IFIND_REFRESH_TOKEN` is not configured, the pipeline can still complete, but `market_snapshot.capture_status` may remain `partial` because Yahoo Finance chart requests are rate-limited in live runs.
 
-After startup, the overnight product is centered on:
+<!-- readme-parity:container-startup -->
+## Container Startup
 
-- `http://127.0.0.1:8000/overnight`
-- `http://127.0.0.1:8000/overnight/opening`
-- `http://127.0.0.1:8000/overnight/changes`
-- `http://127.0.0.1:8000/overnight/playbook`
-- `http://127.0.0.1:8000/overnight/history`
-
-Key APIs:
-
-- `/api/v1/overnight/brief/latest`
-- `/api/v1/overnight/brief/latest/delta`
-- `/api/v1/overnight/history`
-- `/api/v1/overnight/history/events`
-- `/api/v1/overnight/history/topics`
-- `/api/v1/overnight/feedback`
-
-## Local Verification
-
-Frontend verification:
+Build and run with Compose:
 
 ```bash
-npm --prefix apps/dsa-web run build
-npx tsx --test apps/dsa-web/tests/overnightEventContext.test.ts
-npx tsx --test apps/dsa-web/tests/overnightLinkage.test.ts
-npx tsx --test apps/dsa-web/tests/overnightDecision.test.ts
+docker compose up --build
 ```
 
-Backend verification depends on local Python dependencies being installed.
-If your environment has the required packages, run:
+The API will listen on `http://127.0.0.1:8000`.
 
-```bash
-python3 -m pytest tests/test_overnight_api.py tests/test_overnight_brief_builder.py tests/test_overnight_storage.py
-```
+The Docker build context is filtered by `.dockerignore` so local caches, runtime databases, and exported outputs are excluded from the image build path.
 
-## Repo Structure
+<!-- readme-parity:rollback-notes -->
+## Rollback Notes
 
-Important paths:
+- If release hardening breaks an existing local workflow, first check whether the instance was previously depending on external repo env files.
+- Roll back by redeploying the previous image/build and restoring the previous env contract.
+- Do not remove the admin gate in production as a shortcut; use `OVERNIGHT_ADMIN_API_KEY`.
 
-- `api/v1/endpoints/overnight.py`
-- `src/services/overnight_service.py`
-- `src/repositories/overnight_repo.py`
-- `src/overnight/brief_builder.py`
-- `apps/dsa-web/src/pages/`
-- `apps/dsa-web/src/utils/`
-- `apps/dsa-web/tests/`
+<!-- readme-parity:disabled-source-invariants -->
+## Disabled-Source Invariants
 
-## Notes
+The following source ids remain intentionally disabled in this project and should stay disabled during release work:
 
-- The repo still contains broader stock-analysis infrastructure inherited from the original codebase.
-- This forked repo is maintained as a dedicated home for the overnight decision product.
-- If overseas sources are unreachable locally, check proxy configuration before assuming the overnight pages are broken.
+- `state_spokesperson_releases`
+- `dod_news_releases`
 
-## License
+<!-- readme-parity:self-hosted-acceptance-criteria -->
+## Self-Hosted Acceptance Criteria
 
-[MIT License](LICENSE)
+- API starts from this repository alone with project-local env files
+- `healthz` and authenticated `readyz` both succeed
+- public read routes work without premium/admin headers
+- premium routes reject unauthenticated requests and succeed with the premium key
+- admin mutation routes reject unauthenticated requests and succeed with the admin key
+- one end-to-end pipeline run completes successfully

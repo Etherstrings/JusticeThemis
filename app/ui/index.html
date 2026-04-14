@@ -1,0 +1,88 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>JusticeThemis Operator Console</title>
+    <link rel="stylesheet" href="/ui/styles.css" />
+  </head>
+  <body>
+    <div class="page-shell">
+      <div class="ambient ambient-left"></div>
+      <div class="ambient ambient-right"></div>
+
+      <header class="hero">
+        <div class="hero-copy">
+          <p class="eyebrow">JusticeThemis</p>
+          <h1>Overnight Signal Desk</h1>
+          <p class="hero-summary">
+            Capture official-first overseas news before your trading morning, keep the source visible,
+            and hand structured facts to a downstream model without hiding the provenance.
+          </p>
+        </div>
+        <div class="hero-panel">
+          <label class="operator-field" for="adminAccessKeyInput">
+            <span class="operator-label">Admin Access Key</span>
+            <input
+              id="adminAccessKeyInput"
+              class="operator-input"
+              type="password"
+              autocomplete="off"
+              placeholder="Only needed for refresh / readyz"
+            />
+          </label>
+          <p class="operator-help">Stored locally in your browser only. Leave blank for read-only use.</p>
+          <button id="refreshButton" class="action-button" type="button">Refresh Sources</button>
+          <p id="refreshStatus" class="status-line">Waiting for first refresh.</p>
+          <dl class="hero-metrics">
+            <div>
+              <dt>Captured</dt>
+              <dd id="metricItems">0</dd>
+            </div>
+            <div>
+              <dt>Official</dt>
+              <dd id="metricOfficial">0</dd>
+            </div>
+            <div>
+              <dt>Editorial</dt>
+              <dd id="metricEditorial">0</dd>
+            </div>
+          </dl>
+        </div>
+      </header>
+
+      <main class="dashboard-grid">
+        <section class="panel panel-news">
+          <div class="panel-header">
+            <div>
+              <p class="panel-kicker">Captured Stream</p>
+              <h2>Latest Items</h2>
+            </div>
+            <p class="panel-note">Every card keeps the original source and canonical URL.</p>
+          </div>
+          <div id="itemsList" class="items-list"></div>
+        </section>
+
+        <section class="panel panel-handoff">
+          <div class="panel-header">
+            <div>
+              <p class="panel-kicker">Model Input</p>
+              <h2>Handoff Package</h2>
+            </div>
+            <p class="panel-note">Official tiers stay ahead of editorial tiers before truncation.</p>
+          </div>
+          <div class="handoff-summary">
+            <p id="handoffPrompt" class="prompt-box">Prompt scaffold will appear here.</p>
+            <div id="handoffGroups" class="group-list"></div>
+          </div>
+          <details class="json-panel">
+            <summary>Raw handoff JSON</summary>
+            <pre id="handoffJson">Loading...</pre>
+          </details>
+        </section>
+      </main>
+    </div>
+
+    <script type="module" src="/ui/app.js"></script>
+  </body>
+</html>
