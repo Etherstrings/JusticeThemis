@@ -214,6 +214,11 @@ def render_daily_report_markdown(report: dict[str, Any]) -> str:
     direction_calls = list(report.get("direction_calls", []) or [])
     stock_calls = list(report.get("stock_calls", []) or [])
     risk_watchpoints = list(report.get("risk_watchpoints", []) or [])
+    market_move_brief = dict(report.get("market_move_brief", {}) or {})
+    event_drivers = [
+        item for item in list(report.get("event_drivers", []) or []) if isinstance(item, dict)
+    ]
+    editorial_chain_cn = str(report.get("editorial_chain_cn", "")).strip()
     key_news_items = [
         item
         for item in list(report.get("headline_news", []) or report.get("supporting_items", []) or [])
@@ -230,9 +235,48 @@ def render_daily_report_markdown(report: dict[str, Any]) -> str:
         "",
         _render_report_summary(report.get("summary")) or "No summary available.",
         "",
+    ]
+
+    if market_move_brief:
+        lines.extend(
+            [
+                "## Market Moves",
+                "",
+                _render_market_move_brief(market_move_brief),
+                "",
+            ]
+        )
+
+    if event_drivers or editorial_chain_cn:
+        lines.extend(["## Driver Chain", ""])
+        if event_drivers:
+            for driver in event_drivers[:4]:
+                source_name = str(driver.get("source_name", "")).strip()
+                title = str(driver.get("title", "")).strip()
+                lines.append(f"- {source_name} | {title}")
+                brief = str(driver.get("user_brief_cn", "")).strip()
+                if brief:
+                    lines.append(f"  brief: {brief}")
+                why_it_matters = str(driver.get("why_it_matters_cn", "")).strip()
+                if why_it_matters:
+                    lines.append(f"  why: {why_it_matters}")
+                detail_facts = [
+                    str(item).strip()
+                    for item in list(driver.get("detail_facts", []) or [])
+                    if str(item).strip()
+                ]
+                if detail_facts:
+                    lines.append(f"  facts: {'；'.join(detail_facts[:4])}")
+        if editorial_chain_cn:
+            lines.append(f"- 编辑链路总结 | {editorial_chain_cn}")
+        lines.append("")
+
+    lines.extend(
+        [
         "## Direction Calls",
         "",
-    ]
+        ]
+    )
 
     if not direction_calls:
         lines.append("- No direction calls.")
@@ -298,7 +342,7 @@ def _render_report_summary(summary: Any) -> str:
 
 
 def _render_supporting_item_brief(item: dict[str, Any]) -> str:
-    for field in ("llm_ready_brief", "impact_summary"):
+    for field in ("user_brief_cn", "why_it_matters_cn", "llm_ready_brief", "impact_summary"):
         candidate = str(item.get(field, "")).strip()
         if candidate:
             return candidate
@@ -306,3 +350,52 @@ def _render_supporting_item_brief(item: dict[str, Any]) -> str:
     if evidence_points:
         return "；".join(evidence_points[:2])
     return ""
+
+
+def _render_market_move_brief(market_move_brief: dict[str, Any]) -> str:
+    lines: list[str] = []
+    headline = str(market_move_brief.get("headline", "")).strip()
+    if headline:
+        lines.append(headline)
+
+    cross_asset_moves = [
+        item for item in list(market_move_brief.get("cross_asset_moves", []) or []) if isinstance(item, dict)
+    ]
+    if cross_asset_moves:
+        lines.append(
+            "跨资产异动："
+            + "；".join(
+                f"{str(item.get('label', '')).strip()} {str(item.get('change_pct', '')).strip()}"
+                for item in cross_asset_moves
+                if str(item.get("label", "")).strip() and str(item.get("change_pct", "")).strip()
+            )
+            + "。"
+        )
+
+    strongest_move = dict(market_move_brief.get("strongest_move", {}) or {})
+    if strongest_move:
+        lines.append(
+            f"最强异动：{str(strongest_move.get('label', '')).strip()} {str(strongest_move.get('change_pct', '')).strip()}。"
+        )
+    weakest_move = dict(market_move_brief.get("weakest_move", {}) or {})
+    if weakest_move:
+        lines.append(
+            f"最弱异动：{str(weakest_move.get('label', '')).strip()} {str(weakest_move.get('change_pct', '')).strip()}。"
+        )
+
+    china_futures_watch = [
+        item for item in list(market_move_brief.get("china_futures_watch", []) or []) if isinstance(item, dict)
+    ]
+    if china_futures_watch:
+        for item in china_futures_watch[:4]:
+            lines.append(
+                f"中国映射关注：{str(item.get('future_name', '')).strip()} | "
+                f"watch={str(item.get('watch_direction', '')).strip()} | "
+                f"{str(item.get('driver_summary', '')).strip()}"
+            )
+
+    market_data_note = str(market_move_brief.get("market_data_note", "")).strip()
+    if market_data_note:
+        lines.append(market_data_note)
+
+    return "\n".join(line for line in lines if line).strip()

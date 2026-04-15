@@ -10,6 +10,7 @@ from pathlib import Path
 import tempfile
 
 import requests
+import pytest
 
 from fastapi.testclient import TestClient
 
@@ -191,6 +192,26 @@ def test_market_requests_http_client_uses_curl_fallback_when_urllib_fails() -> N
     assert fallback_calls == ["https://query2.finance.yahoo.com/v8/finance/chart/%5ETNX?range=5d&interval=1d"]
 
 
+def test_market_requests_http_client_rejects_plaintext_curl_fallback_body() -> None:
+    session = _Always429Session()
+    client = MarketRequestsHttpClient(
+        session=session,
+        retry_attempts=1,
+        backoff_seconds=0.0,
+        sleep_fn=lambda _seconds: None,
+        urllib_fetcher=lambda _url, _headers, _timeout: (_ for _ in ()).throw(RuntimeError("urllib blocked")),
+        curl_fetcher=lambda _url, _headers, _timeout: "Too Many Requests\r\n",
+    )
+
+    try:
+        client.fetch("https://query2.finance.yahoo.com/v8/finance/chart/%5EGSPC?range=5d&interval=1d")
+    except requests.HTTPError as exc:
+        assert exc.response is not None
+        assert exc.response.status_code == 429
+    else:  # pragma: no cover - defensive assertion
+        raise AssertionError("Expected HTTPError when curl fallback only returns plaintext 429 body")
+
+
 def test_market_snapshot_service_uses_treasury_provider_for_tnx_when_available() -> None:
     with tempfile.TemporaryDirectory() as temp_dir:
         repo = OvernightRepository(Database(Path(temp_dir) / "treasury-provider.db"))
@@ -235,6 +256,125 @@ def test_market_snapshot_service_uses_treasury_provider_for_tnx_when_available()
     assert snapshot["rates_fx"][0]["provider_name"] == "Treasury Yield Curve"
     assert snapshot["rates_fx"][0]["close"] == 4.26
     assert snapshot["capture_summary"]["missing_symbols"] == []
+
+
+def test_market_snapshot_service_uses_stooq_provider_when_yahoo_payload_is_invalid() -> None:
+    with tempfile.TemporaryDirectory() as temp_dir:
+        repo = OvernightRepository(Database(Path(temp_dir) / "stooq-provider.db"))
+        service = UsMarketSnapshotService(
+            repo=repo,
+            http_client=RoutingMarketClient(
+                {
+                    "query2.finance.yahoo.com": "Too Many Requests\r\n",
+                    "stooq.com/q/l/": "Symbol,Date,Time,Open,High,Low,Close,Volume\r\n^SPX,2026-04-14,23:00:00,6910.2,6969.42,6905.17,6967.38,3046739431\r\n",
+                }
+            ),
+            instruments=(
+                MarketInstrumentDefinition(
+                    symbol="^GSPC",
+                    display_name="标普500",
+                    bucket="index",
+                    priority=100,
+                    provider_symbol_overrides=(("Stooq Quotes", "^spx"),),
+                ),
+            ),
+            providers=(
+                MarketDataProviderDefinition(
+                    name="Yahoo Finance Chart",
+                    source_url="https://finance.yahoo.com/",
+                    chart_url_template="https://query2.finance.yahoo.com/v8/finance/chart/{symbol}?range=5d&interval=1d&includePrePost=false",
+                ),
+                MarketDataProviderDefinition(
+                    name="Stooq Quotes",
+                    source_url="https://stooq.com/",
+                    chart_url_template="https://stooq.com/q/l/?s={symbol}&f=sd2t2ohlcv&h&e=csv",
+                ),
+            ),
+        )
+
+        snapshot = service.refresh_us_close_snapshot()
+
+    assert snapshot["indexes"][0]["provider_name"] == "Stooq Quotes"
+    assert snapshot["indexes"][0]["close"] == 6967.38
+    assert snapshot["capture_summary"]["missing_symbols"] == []
+
+
+def test_market_snapshot_service_uses_stooq_prev_close_when_detail_page_is_available() -> None:
+    with tempfile.TemporaryDirectory() as temp_dir:
+        repo = OvernightRepository(Database(Path(temp_dir) / "stooq-prev-close.db"))
+        service = UsMarketSnapshotService(
+            repo=repo,
+            http_client=RoutingMarketClient(
+                {
+                    "stooq.com/q/l/": "Symbol,Date,Time,Open,High,Low,Close,Volume\r\n^SPX,2026-04-14,23:00:00,6910.2,6969.42,6905.17,6967.38,3046739431\r\n",
+                    "stooq.com/q/?s=": "<html><body><span id=aq_^spx_p>6936.00</span><span id=aq_^spx_rr1>+0.45%</span></body></html>",
+                }
+            ),
+            instruments=(
+                MarketInstrumentDefinition(
+                    symbol="^GSPC",
+                    display_name="标普500",
+                    bucket="index",
+                    priority=100,
+                    provider_symbol_overrides=(("Stooq Quotes", "^spx"),),
+                ),
+            ),
+            providers=(
+                MarketDataProviderDefinition(
+                    name="Stooq Quotes",
+                    source_url="https://stooq.com/",
+                    chart_url_template="https://stooq.com/q/l/?s={symbol}&f=sd2t2ohlcv&h&e=csv",
+                    quote_url_template="https://stooq.com/q/?s={symbol}",
+                ),
+            ),
+        )
+
+        snapshot = service.refresh_us_close_snapshot()
+
+    quote = snapshot["indexes"][0]
+    expected_change = 6967.38 - 6936.00
+    expected_change_pct = (expected_change / 6936.00) * 100.0
+    assert quote["provider_name"] == "Stooq Quotes"
+    assert quote["previous_close"] == pytest.approx(6936.00)
+    assert quote["change"] == pytest.approx(expected_change)
+    assert quote["change_pct"] == pytest.approx(expected_change_pct)
+    assert quote["change_pct_text"] == f"{expected_change_pct:+.2f}%"
+
+
+def test_market_snapshot_service_inverts_stooq_cnyusd_quote_for_usdcnh() -> None:
+    with tempfile.TemporaryDirectory() as temp_dir:
+        repo = OvernightRepository(Database(Path(temp_dir) / "stooq-cnh.db"))
+        service = UsMarketSnapshotService(
+            repo=repo,
+            http_client=RoutingMarketClient(
+                {
+                    "stooq.com/q/l/": "Symbol,Date,Time,Open,High,Low,Close,Volume\r\nCNYUSD,2026-04-15,12:00:56,0.14684,0.146873,0.146612,0.146667,\r\n",
+                }
+            ),
+            instruments=(
+                MarketInstrumentDefinition(
+                    symbol="CNH=X",
+                    display_name="美元/离岸人民币",
+                    bucket="rates_fx",
+                    priority=100,
+                    provider_symbol_overrides=(("Stooq Quotes", "cnyusd"),),
+                ),
+            ),
+            providers=(
+                MarketDataProviderDefinition(
+                    name="Stooq Quotes",
+                    source_url="https://stooq.com/",
+                    chart_url_template="https://stooq.com/q/l/?s={symbol}&f=sd2t2ohlcv&h&e=csv",
+                ),
+            ),
+        )
+
+        snapshot = service.refresh_us_close_snapshot()
+
+    quote = snapshot["rates_fx"][0]
+    assert quote["provider_name"] == "Stooq Quotes"
+    assert quote["provider_symbol"] == "cnyusd"
+    assert quote["close"] == pytest.approx(1 / 0.146667, rel=1e-6)
 
 
 def _seed_item(

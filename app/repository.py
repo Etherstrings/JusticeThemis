@@ -53,9 +53,10 @@ class OvernightRepository:
                     published_at,
                     published_at_source,
                     normalized_entities,
-                    normalized_numeric_facts
+                    normalized_numeric_facts,
+                    source_context_json
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     item.raw_id,
@@ -74,6 +75,7 @@ class OvernightRepository:
                     item.published_at_source,
                     json.dumps([asdict(entity) for entity in item.entities], ensure_ascii=True),
                     json.dumps([asdict(fact) for fact in item.numeric_facts], ensure_ascii=True),
+                    json.dumps(item.source_context, ensure_ascii=True, sort_keys=True),
                 ),
             )
             row = connection.execute(
@@ -912,6 +914,7 @@ class OvernightRepository:
             else None,
             "entities": [asdict(entity) for entity in stored_item.entities],
             "numeric_facts": [asdict(fact) for fact in stored_item.numeric_facts],
+            "source_context": dict(stored_item.source_context),
             "family_id": stored_item.family_id,
             "family_key": stored_item.family_key,
             "family_type": stored_item.family_type,
@@ -1076,6 +1079,7 @@ class OvernightRepository:
             article_fetch_status=str(row["article_fetch_status"] or "not_attempted"),
             entities=tuple(EntityMention(**item) for item in json.loads(row["normalized_entities"] or "[]")),
             numeric_facts=tuple(NumericFact(**item) for item in json.loads(row["normalized_numeric_facts"] or "[]")),
+            source_context=json.loads(str(row["source_context_json"] or "{}")),
             family_id=int(family_id) if family_id is not None else None,
             family_key=str(family_key) if family_key is not None else None,
             family_type=str(family_type) if family_type is not None else None,

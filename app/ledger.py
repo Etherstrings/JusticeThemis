@@ -3,7 +3,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime
 
 from app.normalizer import EntityMention, NumericFact
@@ -28,6 +28,7 @@ class StoredSourceItem:
     article_fetch_status: str
     entities: tuple[EntityMention, ...]
     numeric_facts: tuple[NumericFact, ...]
+    source_context: dict[str, object] = field(default_factory=dict)
     family_id: int | None = None
     family_key: str | None = None
     family_type: str | None = None

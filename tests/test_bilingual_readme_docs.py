@@ -14,6 +14,7 @@ EXPECTED_PARITY_IDS = [
     "runtime-contract",
     "legacy-compatibility-mapping",
     "environment-variables",
+    "release-boundary-and-first-run",
     "current-output-layers",
     "local-startup",
     "canonical-upstream-and-sync",

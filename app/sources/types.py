@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import Any
 
 
 @dataclass(frozen=True)
@@ -44,6 +45,8 @@ class SourceCandidate:
     candidate_published_at_source: str = ""
     candidate_section: str | None = None
     candidate_tags: tuple[str, ...] = ()
+    candidate_entity_names: tuple[str, ...] = ()
+    source_context: dict[str, Any] | None = None
     needs_article_fetch: bool = False
     needs_attachment_fetch: bool = False
     capture_path: str = "direct"

@@ -14,6 +14,7 @@ from typing import Callable, Iterator, Sequence
 from urllib.parse import urlsplit
 
 from app.collectors.article import ArticleCollector
+from app.collectors.readhub import ReadhubDailyCollector
 from app.collectors.section import SectionCollector
 from app.db import Database
 from app.repository import OvernightRepository
@@ -38,6 +39,7 @@ DEFAULT_SOURCE_IDS: tuple[str, ...] = (
     "bis_news_updates",
     "doe_articles",
 )
+READHUB_SOURCE_ID = "readhub_daily_digest"
 
 
 def summarize_search_candidates(
@@ -228,6 +230,78 @@ def collect_section_capture_validation_report(
     }
 
 
+def collect_readhub_capture_validation_report(
+    *,
+    collector: ReadhubDailyCollector | object,
+    source: SourceDefinition,
+) -> dict[str, object]:
+    try:
+        candidates = collector.collect(source)
+    except Exception as exc:
+        return {
+            "source_id": source.source_id,
+            "display_name": source.display_name,
+            "status": "error",
+            "error": str(exc),
+            "daily_issue_date": "",
+            "daily_item_count": 0,
+            "sample_topic_urls": [],
+            "enrichment_populated_count": 0,
+            "enrichment_visibility": {
+                "tag_count": 0,
+                "tracking_count": 0,
+                "similar_event_count": 0,
+                "news_link_count": 0,
+            },
+            "legacy_alias_probe_errors": [],
+        }
+
+    issue_dates = []
+    enrichment_populated_count = 0
+    tag_count = 0
+    tracking_count = 0
+    similar_event_count = 0
+    news_link_count = 0
+    for candidate in candidates:
+        source_context = dict(candidate.source_context or {})
+        daily_context = dict(source_context.get("daily", {}) or {})
+        issue_date = str(daily_context.get("issue_date", "")).strip()
+        if issue_date and issue_date not in issue_dates:
+            issue_dates.append(issue_date)
+        topic_context = dict(source_context.get("topic", {}) or {})
+        tags = list(topic_context.get("tags", []) or [])
+        tracking = list(topic_context.get("tracking", []) or [])
+        similar_events = list(topic_context.get("similar_events", []) or [])
+        news_links = list(topic_context.get("news_links", []) or [])
+        if tags or tracking or similar_events or news_links:
+            enrichment_populated_count += 1
+        tag_count += len(tags)
+        tracking_count += len(tracking)
+        similar_event_count += len(similar_events)
+        news_link_count += len(news_links)
+
+    return {
+        "source_id": source.source_id,
+        "display_name": source.display_name,
+        "status": "ok",
+        "daily_issue_date": issue_dates[0] if issue_dates else "",
+        "daily_item_count": len(candidates),
+        "sample_topic_urls": [
+            candidate.candidate_url
+            for candidate in candidates[:5]
+            if candidate.candidate_url
+        ],
+        "enrichment_populated_count": enrichment_populated_count,
+        "enrichment_visibility": {
+            "tag_count": tag_count,
+            "tracking_count": tracking_count,
+            "similar_event_count": similar_event_count,
+            "news_link_count": news_link_count,
+        },
+        "legacy_alias_probe_errors": list(getattr(collector, "last_errors", []) or []),
+    }
+
+
 def build_env_backed_search_validation_report(
     *,
     env_file_paths: Sequence[Path | str] = DEFAULT_ENV_FILE_PATHS,
@@ -347,6 +421,21 @@ def build_section_capture_validation_report(
     )
 
 
+def build_readhub_capture_validation_report(*, http_client: object | None = None) -> dict[str, object]:
+    source = _resolve_sources((READHUB_SOURCE_ID,))
+    if not source:
+        return {
+            "source_id": READHUB_SOURCE_ID,
+            "status": "error",
+            "error": "Readhub source is not registered",
+        }
+    collector = ReadhubDailyCollector(http_client=http_client or RequestsHttpClient())
+    return collect_readhub_capture_validation_report(
+        collector=collector,
+        source=source[0],
+    )
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="python -m app.live_validation")
     parser.add_argument(
@@ -373,6 +462,11 @@ def main(argv: Sequence[str] | None = None) -> int:
         action="store_true",
         help="Also run the live U.S. market snapshot validation.",
     )
+    parser.add_argument(
+        "--include-readhub-capture",
+        action="store_true",
+        help="Also validate the dedicated Readhub daily/topic capture path.",
+    )
     args = parser.parse_args(list(argv) if argv is not None else None)
 
     env_file_paths = tuple(args.env_file) or DEFAULT_ENV_FILE_PATHS
@@ -392,6 +486,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         )
     if args.include_market_snapshot:
         report["market_snapshot"] = build_market_snapshot_validation_report(env_file_paths=env_file_paths)
+    if args.include_readhub_capture:
+        report["readhub_capture"] = build_readhub_capture_validation_report()
     print(json.dumps(report, ensure_ascii=False, indent=2))
     return 0
 

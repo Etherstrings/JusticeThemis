@@ -53,6 +53,48 @@ JusticeThemis 是一个独立运行的隔夜国际新闻采集、美国收盘快
 
 当前阶段仍继续使用 `OVERNIGHT_*` 运行时前缀以维持兼容性。暂时不要求迁移到 `JUSTICE_THEMIS_*`。
 
+<!-- readme-parity:release-boundary-and-first-run -->
+## 发布边界与首次运行
+
+### 发布结论
+
+基于 2026 年 4 月 16 日的实际验证，当前结论是：
+
+- 当前支持的用户层级：技术型自托管用户 / 内部操作者
+- 当前不支持的用户层级：泛用户 / 低接触外部用户
+- 当前产品状态：适合技术型用户亲手验证的后端 beta，还不能叫面向泛用户的成品
+
+当前仍阻止更宽发布宣称的原因：
+
+- premium/admin 访问仍依赖共享 header key，而不是终端用户账户体系
+- 首次运行路径仍是 operator workflow，不是低接触消费型体验
+- BLS 官方页面当前会返回 403，所以 live run 里的官方宏观源覆盖仍可能以 warning 结束
+
+### 首次运行门槛
+
+面向当前支持用户层级的一条 fresh checkout 成功路径是：
+
+1. 运行 `uv sync --dev`
+2. 在 `.env.local` 或进程环境里设置 `OVERNIGHT_ADMIN_API_KEY` 和 `OVERNIGHT_PREMIUM_API_KEY`
+3. 启动 `uv run python -m uvicorn app.main:app --host 127.0.0.1 --port 8000`
+4. 验证 `GET /healthz`、带鉴权的 `GET /readyz`，以及 `GET /api/v1/news?limit=3`
+5. 再执行一次真实后端证据运行：`.venv/bin/python -m app.backend_live_run_evidence --analysis-date 2026-04-16`
+
+可接受但属于降级的首次运行状态：
+
+- 缺少 `IFIND_REFRESH_TOKEN` 时，market snapshot 仍可依赖 Treasury/Stooq fallback 完成，但覆盖面会更薄
+- 缺少 `ALPHA_VANTAGE_API_KEY` 时，ticker enrichment 会保持 skipped，但固定日报仍可生成
+- 如果 BLS 官方页面返回 403，这一轮 live run 仍可完成，但 release verdict 只能保持 beta，不能声称已产品化完成
+
+主要失败模式与下一步动作：
+
+- `readyz` 或变更路由返回 `401` / `403`：先检查 `OVERNIGHT_ADMIN_API_KEY`
+- premium 只读路由被拒绝：先检查 `OVERNIGHT_PREMIUM_API_KEY`
+- `uv sync --dev` 或 `uvicorn` 启动失败：先修复本地 Python/uv 环境，再判断产品 readiness
+- live run 健康状态仍是 `warn`：优先查看 source diagnostics，重点看 BLS 403 和上游限流
+
+完整的审计与首次运行 verdict 见 [docs/technical/2026-04-16-user-release-boundary-and-first-run-verdict.md](/Users/boyuewu/Documents/Projects/AIProjects/overnight-news-handoff/docs/technical/2026-04-16-user-release-boundary-and-first-run-verdict.md)。
+
 <!-- readme-parity:current-output-layers -->
 ## 当前输出层
 

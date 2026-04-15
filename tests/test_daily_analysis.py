@@ -546,7 +546,8 @@ def test_get_daily_analysis_returns_latest_cached_report_and_premium_requires_ke
         assert free_payload["narratives"]["market_view"]
         assert free_payload["narratives"]["sector_view"]
         assert any(call["direction"] == "银行/保险" for call in free_payload["direction_calls"])
-        assert any(call["direction"] == "油气开采" for call in free_payload["direction_calls"])
+        assert any(call["direction"] == "油服" for call in free_payload["direction_calls"])
+        assert all(call["direction"] != "油气开采" for call in free_payload["direction_calls"])
         assert any(item["item_id"] for item in free_payload["supporting_items"])
         assert premium_denied.status_code == 403
         assert premium_denied.json() == {"detail": "Premium access key required"}
@@ -556,7 +557,7 @@ def test_get_daily_analysis_returns_latest_cached_report_and_premium_requires_ke
         assert premium_payload["access_tier"] == "premium"
         assert premium_payload["version"] == 2
         assert premium_payload["stock_calls"]
-        assert any(call["ticker"] == "601398.SH" for call in premium_payload["stock_calls"])
+        assert any(call["ticker"] == "600583.SH" for call in premium_payload["stock_calls"])
 
 
 def test_generate_daily_analysis_excludes_stale_same_day_captures(monkeypatch) -> None:
@@ -600,6 +601,91 @@ def test_generate_daily_analysis_excludes_stale_same_day_captures(monkeypatch) -
         assert free_report["input_item_ids"] == [fresh_item_id]
         assert all(item["item_id"] != stale_item_id for item in free_report["supporting_items"])
         assert free_report["input_snapshot"]["item_count"] == 1
+
+
+def test_generate_daily_analysis_uses_market_date_news_window_when_snapshot_rolls_forward() -> None:
+    with tempfile.TemporaryDirectory() as temp_dir:
+        database = Database(Path(temp_dir) / "test_daily_analysis_market_date_window.db")
+        repo = OvernightRepository(database)
+        prior_window_item_id = _seed_item(
+            repo,
+            source_id="ap_world",
+            url="https://example.com/ap/iran-talks",
+            title="Iran talks remain in focus after overnight energy shock",
+            summary="Officials weigh next steps after overnight oil-market volatility and renewed Middle East diplomacy.",
+            published_at="2026-04-15T04:45:34+00:00",
+            created_at="2026-04-15 15:54:57",
+        )
+        capture_service = OvernightSourceCaptureService(
+            repo=repo,
+            registry=build_default_source_registry(),
+        )
+        market_snapshot_service = StaticMarketSnapshotService(
+            {
+                "analysis_date": "2026-04-16",
+                "market_date": "2026-04-15",
+                "capture_summary": {
+                    "capture_status": "complete",
+                    "captured_instrument_count": 25,
+                    "missing_symbols": [],
+                    "core_missing_symbols": [],
+                },
+                "market_regimes": [
+                    {
+                        "regime_id": "2026-04-16__china_proxy_strength",
+                        "regime_key": "china_proxy_strength",
+                        "triggered": True,
+                        "direction": "bullish",
+                        "strength": 1.6,
+                        "confidence": "medium",
+                        "driving_symbols": ["KWEB", "FXI"],
+                        "supporting_observations": [],
+                        "suppressed_by": [],
+                    }
+                ],
+                "market_regime_evaluations": [],
+                "asset_board": {
+                    "analysis_date": "2026-04-16",
+                    "headline": "纳指综指 +0.85%；标普500 +0.24%；美国10年期国债收益率 -0.93%；WTI原油 +0.17%；黄金 -0.96%；风险状态 mixed。",
+                    "indexes": [
+                        {"symbol": "^IXIC", "display_name": "纳指综指", "change_pct": 0.85, "priority": 98},
+                        {"symbol": "^GSPC", "display_name": "标普500", "change_pct": 0.24, "priority": 100},
+                    ],
+                    "sectors": [
+                        {"symbol": "XLE", "display_name": "能源板块", "change_pct": 0.48, "priority": 82},
+                    ],
+                    "sentiment": [
+                        {"symbol": "^VIX", "display_name": "VIX", "change_pct": 1.52, "priority": 92},
+                    ],
+                    "rates_fx": [
+                        {"symbol": "^TNX", "display_name": "美国10年期国债收益率", "change_pct": -0.93, "priority": 76},
+                    ],
+                    "precious_metals": [
+                        {"symbol": "GC=F", "display_name": "黄金", "change_pct": -0.96, "priority": 72},
+                    ],
+                    "energy": [
+                        {"symbol": "CL=F", "display_name": "WTI原油", "change_pct": 0.17, "priority": 70},
+                    ],
+                    "industrial_metals": [],
+                    "china_mapped_futures": [],
+                },
+            }
+        )
+        from app.services.daily_analysis import DailyAnalysisService
+
+        service = DailyAnalysisService(
+            repo=repo,
+            capture_service=capture_service,
+            market_snapshot_service=market_snapshot_service,
+        )
+
+        result = service.generate_daily_reports(analysis_date="2026-04-16", recent_limit=50)
+
+    free_report = next(report for report in result["reports"] if report["access_tier"] == "free")
+    assert free_report["input_item_ids"] == [prior_window_item_id]
+    assert free_report["input_snapshot"]["item_count"] == 1
+    assert free_report["supporting_items"][0]["item_id"] == prior_window_item_id
+    assert free_report["market_snapshot"]["analysis_date"] == "2026-04-16"
 
 
 def test_generate_daily_analysis_includes_secondary_event_groups(monkeypatch) -> None:
@@ -991,6 +1077,431 @@ def test_rule_based_daily_analysis_deduplicates_direction_weight_inside_same_eve
     assert direction_call["score"] == expected_max_score
     assert direction_call["event_cluster_count"] == 1
     assert direction_call["evidence_item_ids"] == [1, 2]
+
+
+def test_rule_based_daily_analysis_compresses_overlapping_energy_siblings_before_stock_mapping() -> None:
+    provider = RuleBasedDailyAnalysisProvider()
+
+    def make_item(
+        *,
+        item_id: int,
+        cluster_id: str,
+        title: str,
+        beneficiary_directions: list[str],
+        evidence_point: str,
+    ) -> dict[str, object]:
+        return {
+            "item_id": item_id,
+            "source_id": f"energy_source_{item_id}",
+            "source_name": f"Energy Source {item_id}",
+            "title": title,
+            "coverage_tier": "official_policy",
+            "priority": 100,
+            "analysis_status": "ready",
+            "analysis_confidence": "high",
+            "a_share_relevance": "high",
+            "source_capture_confidence": {"level": "high", "score": 92},
+            "cross_source_confirmation": {"level": "moderate", "supporting_source_count": 1},
+            "fact_conflicts": [],
+            "event_cluster": {
+                "cluster_id": cluster_id,
+                "cluster_status": "confirmed",
+                "primary_item_id": item_id,
+                "item_count": 1,
+                "source_count": 1,
+                "official_source_count": 1,
+                "member_item_ids": [item_id],
+                "member_source_ids": [f"energy_source_{item_id}"],
+                "latest_published_at": f"2026-04-07T0{item_id}:00:00+00:00",
+                "topic_tags": ["energy_shipping"],
+                "fact_signatures": [cluster_id],
+            },
+            "timeliness": {
+                "anchor_time": "2026-04-07T03:00:00+00:00",
+                "age_hours": 0.5,
+                "publication_lag_minutes": 20,
+                "freshness_bucket": "breaking",
+                "is_timely": True,
+                "timeliness_flags": [],
+            },
+            "beneficiary_directions": list(beneficiary_directions),
+            "pressured_directions": [],
+            "price_up_signals": [],
+            "follow_up_checks": ["确认能源政策执行细则。"],
+            "evidence_points": [evidence_point],
+            "impact_summary": "能源主线继续强化。",
+            "llm_ready_brief": f"item_id={item_id} | Energy Source {item_id}",
+        }
+
+    report = provider.generate_report(
+        analysis_date="2026-04-07",
+        access_tier="premium",
+        items=[
+            make_item(
+                item_id=1,
+                cluster_id="energy_upstream__1",
+                title="White House backs offshore energy expansion",
+                beneficiary_directions=["油服", "油气开采"],
+                evidence_point="Offshore energy expansion remains a priority.",
+            ),
+            make_item(
+                item_id=2,
+                cluster_id="energy_upstream__2",
+                title="DOE says pipeline buildout supports service demand",
+                beneficiary_directions=["油服"],
+                evidence_point="Pipeline buildout lifts energy service demand.",
+            ),
+        ],
+    )
+
+    visible_directions = [call["direction"] for call in report["direction_calls"]]
+    visible_tickers = [call["ticker"] for call in report["stock_calls"]]
+
+    assert "油服" in visible_directions
+    assert "油气开采" not in visible_directions
+    assert "600583.SH" in visible_tickers
+    assert "600871.SH" in visible_tickers
+    assert "600938.SH" not in visible_tickers
+    assert "601857.SH" not in visible_tickers
+
+
+def test_rule_based_daily_analysis_emits_chinese_first_user_briefs_for_headline_news() -> None:
+    provider = RuleBasedDailyAnalysisProvider()
+
+    def make_item(
+        *,
+        item_id: int,
+        source_id: str,
+        source_name: str,
+        title: str,
+        impact_summary: str,
+        llm_ready_brief: str,
+        evidence_points: list[str],
+    ) -> dict[str, object]:
+        return {
+            "item_id": item_id,
+            "source_id": source_id,
+            "source_name": source_name,
+            "title": title,
+            "coverage_tier": "official_policy" if item_id == 1 else "editorial_media",
+            "priority": 100 if item_id == 1 else 70,
+            "analysis_status": "ready" if item_id == 1 else "review",
+            "analysis_confidence": "high" if item_id == 1 else "medium",
+            "a_share_relevance": "high",
+            "source_capture_confidence": {"level": "high" if item_id == 1 else "medium", "score": 90 if item_id == 1 else 65},
+            "cross_source_confirmation": {"level": "moderate", "supporting_source_count": 1 if item_id == 1 else 0},
+            "fact_conflicts": [],
+            "event_cluster": {
+                "cluster_id": f"brief_cluster_{item_id}",
+                "cluster_status": "confirmed",
+                "primary_item_id": item_id,
+                "item_count": 1,
+                "source_count": 1,
+                "official_source_count": 1 if item_id == 1 else 0,
+                "member_item_ids": [item_id],
+                "member_source_ids": [source_id],
+                "latest_published_at": f"2026-04-07T0{item_id}:00:00+00:00",
+                "topic_tags": ["trade_policy"] if item_id == 1 else ["energy_shipping"],
+                "fact_signatures": [],
+            },
+            "timeliness": {
+                "anchor_time": "2026-04-07T03:00:00+00:00",
+                "age_hours": 0.5,
+                "publication_lag_minutes": 20,
+                "freshness_bucket": "breaking",
+                "is_timely": True,
+                "timeliness_flags": [],
+            },
+            "beneficiary_directions": ["进口替代制造链"] if item_id == 1 else ["油服"],
+            "pressured_directions": [],
+            "price_up_signals": [],
+            "follow_up_checks": ["确认执行细则。"],
+            "evidence_points": list(evidence_points),
+            "impact_summary": impact_summary,
+            "llm_ready_brief": llm_ready_brief,
+        }
+
+    report = provider.generate_report(
+        analysis_date="2026-04-07",
+        access_tier="free",
+        items=[
+            make_item(
+                item_id=1,
+                source_id="whitehouse_news",
+                source_name="White House News",
+                title="白宫确认维持钢铁关税",
+                impact_summary="item_id=1 | 2026-04-07 03:00 CST | White House News | authority=primary_official",
+                llm_ready_brief="item_id=1 | White House News | watch=确认税率与执行时间。",
+                evidence_points=["维持 25% 钢铁关税。", "关注执行时间。"],
+            ),
+            make_item(
+                item_id=2,
+                source_id="ap_business",
+                source_name="AP Business",
+                title="航运运价继续上涨",
+                impact_summary="",
+                llm_ready_brief="",
+                evidence_points=["中东冲突扰动航线。", "油价和运价同步抬升。"],
+            ),
+        ],
+    )
+
+    headline_news = list(report["headline_news"])
+    official_item = next(item for item in headline_news if item["item_id"] == 1)
+    editorial_item = next(item for item in headline_news if item["item_id"] == 2)
+
+    assert official_item["user_brief_cn"]
+    assert official_item["brief_source"] == "synthesized_cn"
+    assert "item_id=" not in official_item["user_brief_cn"]
+    assert "白宫确认维持钢铁关税" in official_item["user_brief_cn"]
+    assert editorial_item["user_brief_cn"]
+    assert editorial_item["brief_source"] == "evidence_points"
+    assert "中东冲突扰动航线" in editorial_item["user_brief_cn"]
+
+
+def test_rule_based_daily_analysis_emits_detailed_market_moves_and_editorial_driver_chain() -> None:
+    provider = RuleBasedDailyAnalysisProvider()
+
+    report = provider.generate_report(
+        analysis_date="2026-04-15",
+        access_tier="free",
+        items=[
+            {
+                "item_id": 1,
+                "source_id": "whitehouse_news",
+                "source_name": "White House News",
+                "title": "Trump team weighs additional Middle East deployment",
+                "coverage_tier": "official_policy",
+                "priority": 100,
+                "analysis_status": "ready",
+                "analysis_confidence": "high",
+                "a_share_relevance": "high",
+                "source_capture_confidence": {"level": "high", "score": 92},
+                "cross_source_confirmation": {"level": "moderate", "supporting_source_count": 1},
+                "fact_conflicts": [],
+                "event_cluster": {
+                    "cluster_id": "middle_east_energy__deployment__1",
+                    "cluster_status": "confirmed",
+                    "primary_item_id": 1,
+                    "item_count": 1,
+                    "source_count": 1,
+                    "official_source_count": 1,
+                    "member_item_ids": [1],
+                    "member_source_ids": ["whitehouse_news"],
+                    "latest_published_at": "2026-04-15T06:00:00+00:00",
+                    "topic_tags": ["energy_shipping"],
+                    "fact_signatures": [],
+                },
+                "timeliness": {
+                    "anchor_time": "2026-04-15T07:00:00+00:00",
+                    "age_hours": 0.5,
+                    "publication_lag_minutes": 25,
+                    "freshness_bucket": "breaking",
+                    "is_timely": True,
+                    "timeliness_flags": [],
+                },
+                "beneficiary_directions": ["油服"],
+                "pressured_directions": ["航空与燃油敏感运输链"],
+                "price_up_signals": ["原油/燃料油"],
+                "follow_up_checks": ["确认霍尔木兹通行状态和增兵节奏。"],
+                "evidence_points": [
+                    "五角大楼将在未来几天向中东增派数千名美军。",
+                    "市场担心霍尔木兹海峡运输风险抬升。",
+                ],
+                "impact_summary": "item_id=1 | White House News | authority=primary_official",
+                "llm_ready_brief": "item_id=1 | White House News | watch=确认霍尔木兹状态。",
+                "key_numbers": [
+                    {"metric": "Brent", "subject": "盘中涨幅", "value_text": "+1.60%"},
+                    {"metric": "WTI", "subject": "盘中涨幅", "value_text": "+1.50%"},
+                ],
+                "fact_table": [
+                    {"text": "ICE 布油盘中突破 96 美元/桶。"},
+                    {"text": "WTI 原油升至 92.69 美元/桶。"},
+                ],
+            },
+            {
+                "item_id": 2,
+                "source_id": "cnbc_markets",
+                "source_name": "CNBC Markets",
+                "title": "Hormuz blockade concerns lift oil intraday",
+                "coverage_tier": "editorial_media",
+                "priority": 80,
+                "analysis_status": "review",
+                "analysis_confidence": "medium",
+                "a_share_relevance": "high",
+                "source_capture_confidence": {"level": "medium", "score": 68},
+                "cross_source_confirmation": {"level": "single_source", "supporting_source_count": 0},
+                "fact_conflicts": [],
+                "event_cluster": {
+                    "cluster_id": "middle_east_energy__deployment__1",
+                    "cluster_status": "confirmed",
+                    "primary_item_id": 1,
+                    "item_count": 2,
+                    "source_count": 2,
+                    "official_source_count": 1,
+                    "member_item_ids": [1, 2],
+                    "member_source_ids": ["whitehouse_news", "cnbc_markets"],
+                    "latest_published_at": "2026-04-15T06:20:00+00:00",
+                    "topic_tags": ["energy_shipping"],
+                    "fact_signatures": [],
+                },
+                "timeliness": {
+                    "anchor_time": "2026-04-15T07:00:00+00:00",
+                    "age_hours": 0.3,
+                    "publication_lag_minutes": 18,
+                    "freshness_bucket": "breaking",
+                    "is_timely": True,
+                    "timeliness_flags": [],
+                },
+                "beneficiary_directions": ["油服"],
+                "pressured_directions": ["化工下游成本敏感链"],
+                "price_up_signals": ["原油/燃料油"],
+                "follow_up_checks": ["确认伊朗出口是否实质下降。"],
+                "evidence_points": [
+                    "分析人士预计封锁若持续，伊朗将在约两周内被迫减产。",
+                    "霍尔木兹海峡流量不确定性继续抬升。",
+                ],
+                "impact_summary": "",
+                "llm_ready_brief": "",
+                "key_numbers": [
+                    {"metric": "Iran exports", "subject": "disruption window", "value_text": "10-15天"},
+                ],
+                "fact_table": [
+                    {"text": "咨询机构认为若出口被切断，伊朗仅能维持 10 到 15 天生产。"},
+                ],
+            },
+        ],
+        market_snapshot={
+            "analysis_date": "2026-04-15",
+            "capture_summary": {
+                "capture_status": "partial",
+                "captured_instrument_count": 6,
+                "missing_symbols": ["XLK"],
+                "core_missing_symbols": ["XLK"],
+            },
+            "asset_board": {
+                "headline": "布伦特原油 +1.60%；WTI原油 +1.50%；黄金 -0.40%；美国10年期国债收益率 +0.06%；风险状态 risk_off。",
+                "indexes": [
+                    {"symbol": "^GSPC", "display_name": "标普500", "change_pct": -0.8, "priority": 90},
+                    {"symbol": "^IXIC", "display_name": "纳指综指", "change_pct": -1.1, "priority": 92},
+                ],
+                "sectors": [],
+                "sentiment": [],
+                "rates_fx": [
+                    {"symbol": "^TNX", "display_name": "美国10年期国债收益率", "change_pct": 0.06, "priority": 80},
+                ],
+                "precious_metals": [
+                    {"symbol": "GC=F", "display_name": "黄金", "change_pct": -0.4, "priority": 81},
+                ],
+                "energy": [
+                    {"symbol": "BZ=F", "display_name": "布伦特原油", "change_pct": 1.6, "priority": 84},
+                    {"symbol": "CL=F", "display_name": "WTI原油", "change_pct": 1.5, "priority": 83},
+                ],
+                "industrial_metals": [],
+                "china_mapped_futures": [
+                    {
+                        "future_code": "pta",
+                        "future_name": "PTA",
+                        "watch_direction": "up",
+                        "watch_score": 1.3,
+                        "driver_summary": "布伦特原油 +1.60%；WTI原油 +1.50%。",
+                    }
+                ],
+                "key_moves": {
+                    "strongest_move": {"symbol": "BZ=F", "display_name": "布伦特原油", "change_pct": 1.6, "priority": 84},
+                    "weakest_move": {"symbol": "GC=F", "display_name": "黄金", "change_pct": -0.4, "priority": 81},
+                },
+                "risk_signals": {"risk_mode": "risk_off"},
+            },
+            "risk_signals": {"risk_mode": "risk_off"},
+            "market_regimes": [],
+            "market_regime_evaluations": [],
+        },
+    )
+
+    market_move_brief = dict(report["market_move_brief"])
+    assert "布伦特原油 +1.60%" in market_move_brief["headline"]
+    assert any(item["label"] == "布伦特原油" and item["change_pct"] == "+1.60%" for item in market_move_brief["cross_asset_moves"])
+    assert market_move_brief["strongest_move"]["label"] == "布伦特原油"
+    assert market_move_brief["weakest_move"]["label"] == "黄金"
+    assert market_move_brief["market_data_note"]
+
+    event_drivers = list(report["event_drivers"])
+    assert event_drivers
+    assert event_drivers[0]["source_name"] == "White House News"
+    assert event_drivers[0]["detail_facts"]
+    assert "Brent=+1.60%" in "；".join(event_drivers[0]["detail_facts"])
+    assert report["editorial_chain_cn"]
+    assert "布伦特原油 +1.60%" in report["editorial_chain_cn"]
+    assert "White House News" in report["editorial_chain_cn"]
+    assert "油服" in report["editorial_chain_cn"]
+
+
+def test_generate_daily_analysis_explains_missing_mainline_grounding_and_caps_confidence_when_core_market_gaps_exist(
+    monkeypatch,
+) -> None:
+    with tempfile.TemporaryDirectory() as temp_dir:
+        admin_headers = _admin_headers(monkeypatch)
+        database = Database(Path(temp_dir) / "test_daily_analysis_market_gap.db")
+        repo = OvernightRepository(database)
+        _seed_item(
+            repo,
+            source_id="whitehouse_news",
+            url="https://example.com/whitehouse/energy-gap",
+            title="White House says energy expansion remains a priority",
+            summary="A timely policy update tied to energy expansion and shipping costs.",
+            published_at="2026-04-10T01:00:00+00:00",
+            created_at="2026-04-10 09:01:00",
+        )
+        capture_service = OvernightSourceCaptureService(
+            repo=repo,
+            registry=build_default_source_registry(),
+        )
+        market_snapshot_service = StaticMarketSnapshotService(
+            {
+                "analysis_date": "2026-04-10",
+                "market_regimes": [],
+                "market_regime_evaluations": [],
+                "capture_summary": {
+                    "capture_status": "partial",
+                    "captured_instrument_count": 1,
+                    "missing_symbols": ["^GSPC", "^IXIC", "XLK"],
+                    "core_missing_symbols": ["^GSPC", "^IXIC", "XLK"],
+                },
+                "asset_board": {
+                    "analysis_date": "2026-04-10",
+                    "indexes": [],
+                    "sectors": [],
+                    "rates_fx": [{"symbol": "^TNX", "display_name": "美国10年期国债收益率", "change_pct": 0.0}],
+                    "precious_metals": [],
+                    "energy": [],
+                    "industrial_metals": [],
+                },
+            }
+        )
+        client = TestClient(
+            create_app(
+                database=database,
+                repo=repo,
+                capture_service=capture_service,
+                market_snapshot_service=market_snapshot_service,
+            )
+        )
+
+        response = client.post(
+            "/api/v1/analysis/daily/generate",
+            params={"analysis_date": "2026-04-10"},
+            headers=admin_headers,
+        )
+
+        assert response.status_code == 200
+        free_report = next(report for report in response.json()["reports"] if report["access_tier"] == "free")
+        assert free_report["mainline_coverage"]["status"] == "degraded"
+        assert free_report["mainline_coverage"]["market_data_status"] == "partial"
+        assert "core_market_gap" in free_report["mainline_coverage"]["suppression_reasons"]
+        assert free_report["summary"]["confidence"] != "high"
+        assert "不完整" in free_report["summary"]["core_view"]
+        assert any("市场" in item or "核心" in item for item in free_report["risk_watchpoints"])
 
 
 def test_get_daily_analysis_prompt_bundle_returns_provider_agnostic_messages(monkeypatch) -> None:

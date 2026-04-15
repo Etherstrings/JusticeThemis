@@ -3,11 +3,13 @@
 
 from __future__ import annotations
 
+import csv
 from dataclasses import dataclass
 from datetime import datetime, timezone
 import json
 import logging
 import os
+import re
 import shlex
 import subprocess
 import time
@@ -22,6 +24,7 @@ from app.repository import OvernightRepository
 from app.services.asset_board import AssetBoardService
 from app.services.market_data_router import (
     IFIND_PROVIDER_NAME,
+    STOOQ_PROVIDER_NAME,
     TREASURY_PROVIDER_NAME,
     build_market_observation_payload,
     ordered_provider_routes,
@@ -37,6 +40,7 @@ logger = logging.getLogger(__name__)
 
 _IFIND_PROVIDER_NAME = IFIND_PROVIDER_NAME
 _TREASURY_PROVIDER_NAME = TREASURY_PROVIDER_NAME
+_STOOQ_PROVIDER_NAME = STOOQ_PROVIDER_NAME
 
 
 class FetchingClient(Protocol):
@@ -162,7 +166,10 @@ class MarketRequestsHttpClient:
         if not _is_yahoo_chart_url(url):
             return None
         try:
-            return self._curl_fetcher(url, headers, timeout)
+            payload = self._curl_fetcher(url, headers, timeout)
+            if not _looks_like_json_payload(payload):
+                return None
+            return payload
         except Exception as exc:  # pragma: no cover - defensive logging path
             logger.warning("Yahoo curl fallback failed for %s: %s", url, exc)
             return None
@@ -232,16 +239,45 @@ _IFIND_PROVIDER_SYMBOL_OVERRIDES: dict[str, str] = {
 _TREASURY_PROVIDER_SYMBOL_OVERRIDES: dict[str, str] = {
     "^TNX": "^TNX",
 }
+_STOOQ_PROVIDER_SYMBOL_OVERRIDES: dict[str, str] = {
+    "^GSPC": "^spx",
+    "^IXIC": "^ndq",
+    "^DJI": "^dji",
+    "^RUT": "iwm.us",
+    "^VIX": "vxx.us",
+    "XLK": "xlk.us",
+    "SOXX": "soxx.us",
+    "XLF": "xlf.us",
+    "XLE": "xle.us",
+    "XLI": "xli.us",
+    "XLV": "xlv.us",
+    "XLY": "xly.us",
+    "XLP": "xlp.us",
+    "DX-Y.NYB": "dx.f",
+    "CNH=X": "cnyusd",
+    "GC=F": "gc.f",
+    "SI=F": "si.f",
+    "CL=F": "cl.f",
+    "BZ=F": "cb.f",
+    "NG=F": "ng.f",
+    "HG=F": "hg.f",
+    "ALI=F": "ah.f",
+    "KWEB": "kweb.us",
+    "FXI": "fxi.us",
+}
 
 
 def _instrument(symbol: str, display_name: str, bucket: str, priority: int) -> MarketInstrumentDefinition:
     overrides: list[tuple[str, str]] = []
     ifind_symbol = _IFIND_PROVIDER_SYMBOL_OVERRIDES.get(symbol)
     treasury_symbol = _TREASURY_PROVIDER_SYMBOL_OVERRIDES.get(symbol)
+    stooq_symbol = _STOOQ_PROVIDER_SYMBOL_OVERRIDES.get(symbol)
     if ifind_symbol:
         overrides.append((_IFIND_PROVIDER_NAME, ifind_symbol))
     if treasury_symbol:
         overrides.append((_TREASURY_PROVIDER_NAME, treasury_symbol))
+    if stooq_symbol:
+        overrides.append((_STOOQ_PROVIDER_NAME, stooq_symbol))
     return MarketInstrumentDefinition(
         symbol=symbol,
         display_name=display_name,
@@ -299,16 +335,23 @@ _TREASURY_MARKET_DATA_PROVIDER = MarketDataProviderDefinition(
     chart_url_template="treasury://yieldcurve/{symbol}",
     quote_url_template="https://home.treasury.gov/resource-center/data-chart-center/interest-rates/TextView?type=daily_treasury_yield_curve",
 )
+_STOOQ_MARKET_DATA_PROVIDER = MarketDataProviderDefinition(
+    name=_STOOQ_PROVIDER_NAME,
+    source_url="https://stooq.com/",
+    chart_url_template="https://stooq.com/q/l/?s={symbol}&f=sd2t2ohlcv&h&e=csv",
+    quote_url_template="https://stooq.com/q/?s={symbol}",
+)
 
 DEFAULT_MARKET_DATA_PROVIDERS: tuple[MarketDataProviderDefinition, ...] = (
     _TREASURY_MARKET_DATA_PROVIDER,
+    _STOOQ_MARKET_DATA_PROVIDER,
     _YAHOO_MARKET_DATA_PROVIDER,
 )
 
 
 def _build_default_market_data_providers() -> tuple[MarketDataProviderDefinition, ...]:
     if os.environ.get("IFIND_REFRESH_TOKEN", "").strip():
-        return (_IFIND_MARKET_DATA_PROVIDER, _TREASURY_MARKET_DATA_PROVIDER, _YAHOO_MARKET_DATA_PROVIDER)
+        return (_IFIND_MARKET_DATA_PROVIDER, _TREASURY_MARKET_DATA_PROVIDER, _STOOQ_MARKET_DATA_PROVIDER, _YAHOO_MARKET_DATA_PROVIDER)
     return DEFAULT_MARKET_DATA_PROVIDERS
 
 
@@ -532,6 +575,13 @@ class UsMarketSnapshotService:
         for route in routes:
             try:
                 payload = _fetch_payload(self.http_client, route.chart_url)
+                if route.provider_name == _STOOQ_PROVIDER_NAME:
+                    return self._parse_stooq_snapshot(
+                        instrument=instrument,
+                        route=route,
+                        payload=payload,
+                        is_primary_provider=route == routes[0],
+                    )
                 parsed = json.loads(payload)
                 result = list(parsed.get("chart", {}).get("result", []) or [])
                 if not result:
@@ -608,6 +658,94 @@ class UsMarketSnapshotService:
             raise last_error
         raise RuntimeError(f"No market data providers configured for {instrument.symbol}")
 
+    def _parse_stooq_snapshot(
+        self,
+        *,
+        instrument: MarketInstrumentDefinition,
+        route: object,
+        payload: str,
+        is_primary_provider: bool,
+    ) -> dict[str, Any]:
+        rows = list(csv.DictReader(str(payload or "").splitlines()))
+        if not rows:
+            raise ValueError(f"Empty stooq payload for {instrument.symbol}")
+        row = rows[0]
+        close = _stooq_numeric(row.get("Close"))
+        if close is None:
+            raise ValueError(f"No close data for {instrument.symbol}")
+
+        open_value = _stooq_numeric(row.get("Open"))
+        high = _stooq_numeric(row.get("High"))
+        low = _stooq_numeric(row.get("Low"))
+        volume = int(_stooq_numeric(row.get("Volume")) or 0)
+        market_date = str(row.get("Date", "")).strip()
+        if not market_date or market_date == "N/D":
+            raise ValueError(f"No market date for {instrument.symbol}")
+        market_time_value = str(row.get("Time", "")).strip()
+        market_time = market_time_value if market_time_value and market_time_value != "N/D" else "00:00:00"
+        analysis_date = _stooq_analysis_date(market_date=market_date, bucket=instrument.bucket)
+        previous_close = self._fetch_stooq_previous_close(provider_symbol=str(route.provider_symbol).strip())
+        if str(route.provider_symbol).strip().lower() == "cnyusd":
+            open_value, high, low, close = _invert_fx_quote(
+                open_value=open_value,
+                high=high,
+                low=low,
+                close=close,
+            )
+            previous_close = _invert_numeric(previous_close)
+        previous_close = previous_close if previous_close is not None else open_value
+        change = close - previous_close if previous_close is not None else None
+        change_pct = ((change / previous_close) * 100.0) if (change is not None and previous_close) else None
+        market_timestamp = f"{market_date}T{market_time}+00:00"
+
+        return {
+            "symbol": instrument.symbol,
+            "display_name": instrument.display_name,
+            "bucket": instrument.bucket,
+            "priority": instrument.priority,
+            "provider_name": route.provider_name,
+            "provider_symbol": route.provider_symbol,
+            "provider_url": route.provider_url,
+            "quote_url": route.quote_url,
+            "market_time": market_timestamp,
+            "market_time_local": market_timestamp,
+            "analysis_time_shanghai": f"{analysis_date}T08:00:00+08:00",
+            "market_date": market_date,
+            "analysis_date": analysis_date,
+            "instrument_type": _stooq_instrument_type(instrument.bucket),
+            "exchange_name": "Stooq",
+            "exchange_timezone_name": "UTC",
+            "currency": "USD",
+            "close": close,
+            "close_text": _format_number(close),
+            "previous_close": previous_close,
+            "previous_close_text": _format_number(previous_close),
+            "change": change,
+            "change_text": _format_signed_number(change),
+            "change_pct": change_pct,
+            "change_pct_text": _format_signed_percent(change_pct),
+            "change_direction": _change_direction(change),
+            "day_high": high,
+            "day_low": low,
+            "volume": volume,
+            "volume_text": _format_integer(volume),
+            "is_primary_provider": is_primary_provider,
+            "is_fallback_provider": not is_primary_provider,
+        }
+
+    def _fetch_stooq_previous_close(self, *, provider_symbol: str) -> float | None:
+        normalized_symbol = str(provider_symbol).strip().lower()
+        if not normalized_symbol:
+            return None
+        try:
+            payload = _fetch_payload(
+                self.http_client,
+                f"https://stooq.com/q/?s={quote(normalized_symbol, safe='')}",
+            )
+        except Exception:
+            return None
+        return _parse_stooq_previous_close(payload, provider_symbol=normalized_symbol)
+
     def _build_risk_signals(
         self,
         *,
@@ -654,6 +792,79 @@ def _fetch_payload(http_client: object, url: str) -> str:
     else:
         raise TypeError("http_client must be callable or expose fetch(url)")
     return payload.decode("utf-8") if isinstance(payload, bytes) else str(payload)
+
+
+def _looks_like_json_payload(payload: str) -> bool:
+    candidate = str(payload or "").lstrip()
+    return candidate.startswith("{") or candidate.startswith("[")
+
+
+def _stooq_numeric(value: object) -> float | None:
+    candidate = str(value or "").strip()
+    if not candidate or candidate == "N/D":
+        return None
+    return _to_float(candidate)
+
+
+def _parse_stooq_previous_close(payload: str, *, provider_symbol: str) -> float | None:
+    normalized_symbol = str(provider_symbol).strip().lower()
+    if not normalized_symbol:
+        return None
+    match = re.search(
+        rf'id=(?:["\'])?aq_{re.escape(normalized_symbol)}_p(?:["\'])?[^>]*>\s*([^<\s]+)',
+        str(payload or ""),
+        flags=re.IGNORECASE,
+    )
+    if match is None:
+        return None
+    return _stooq_numeric(match.group(1))
+
+
+def _stooq_analysis_date(*, market_date: str, bucket: str) -> str:
+    market_day = datetime.fromisoformat(f"{market_date}T00:00:00+00:00").date()
+    if bucket in {"index", "sector", "sentiment", "china_proxy"}:
+        return market_day.fromordinal(market_day.toordinal() + 1).isoformat()
+    return market_day.isoformat()
+
+
+def _stooq_instrument_type(bucket: str) -> str:
+    mapping = {
+        "index": "INDEX",
+        "sector": "ETF",
+        "sentiment": "INDEX",
+        "rates_fx": "INDEX",
+        "precious_metals": "FUTURE",
+        "energy": "FUTURE",
+        "industrial_metals": "FUTURE",
+        "china_proxy": "ETF",
+    }
+    return mapping.get(str(bucket).strip(), "INDEX")
+
+
+def _invert_fx_quote(
+    *,
+    open_value: float | None,
+    high: float | None,
+    low: float | None,
+    close: float | None,
+) -> tuple[float | None, float | None, float | None, float | None]:
+    def invert(value: float | None) -> float | None:
+        if value in (None, 0):
+            return None
+        return 1.0 / value
+
+    return (
+        invert(open_value),
+        invert(low),
+        invert(high),
+        invert(close),
+    )
+
+
+def _invert_numeric(value: float | None) -> float | None:
+    if value in (None, 0):
+        return None
+    return 1.0 / value
 
 
 def _latest_valid_index(values: list[object]) -> int:

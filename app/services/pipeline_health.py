@@ -27,8 +27,10 @@ class PipelineHealthService:
                 warnings.append("capture produced no new items but reused an existing recent window")
             else:
                 blocking_issues.append("capture collected zero items")
-        elif collected_items < 5 or collected_sources < 3 or recent_total < 5:
-            warnings.append("capture volume looks thin")
+        else:
+            rerun_healthy_recent_window = collected_items < 5 and collected_sources >= 10 and recent_total >= 10
+            if collected_sources < 3 or recent_total < 5 or (collected_items < 5 and not rerun_healthy_recent_window):
+                warnings.append("capture volume looks thin")
         for source_diagnostic in source_diagnostics:
             if not isinstance(source_diagnostic, dict):
                 continue

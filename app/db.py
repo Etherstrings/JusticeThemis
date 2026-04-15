@@ -66,6 +66,7 @@ CREATE TABLE IF NOT EXISTS overnight_source_items (
     published_at_source TEXT NOT NULL DEFAULT '',
     normalized_entities TEXT NOT NULL DEFAULT '[]',
     normalized_numeric_facts TEXT NOT NULL DEFAULT '[]',
+    source_context_json TEXT NOT NULL DEFAULT '{}',
     family_id INTEGER,
     created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY(raw_id) REFERENCES overnight_raw_records(id),
@@ -205,6 +206,7 @@ _REQUIRED_SOURCE_ITEM_COLUMNS: tuple[tuple[str, str], ...] = (
     ("capture_provider", "TEXT NOT NULL DEFAULT ''"),
     ("article_fetch_status", "TEXT NOT NULL DEFAULT 'not_attempted'"),
     ("published_at_source", "TEXT NOT NULL DEFAULT ''"),
+    ("source_context_json", "TEXT NOT NULL DEFAULT '{}'"),
 )
 
 

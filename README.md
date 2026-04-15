@@ -53,6 +53,48 @@ Important variables:
 
 The runtime env prefix remains `OVERNIGHT_*` for compatibility in this phase. There is no required env migration to a `JUSTICE_THEMIS_*` prefix yet.
 
+<!-- readme-parity:release-boundary-and-first-run -->
+## Release Boundary And First-Run
+
+### Release Verdict
+
+Current evidence-backed verdict on April 16, 2026:
+
+- Supported user cohort: technical self-hosted user / internal operator
+- Unsupported user cohort: general end user / low-touch external user
+- Current product state: backend beta that is suitable for hands-on technical evaluation, not a finished general-user product
+
+Current blocking reasons for broader release claims:
+
+- premium/admin access still relies on shared header keys instead of end-user accounts
+- the first-run path is still an operator workflow, not a low-touch consumer experience
+- BLS official pages currently return 403 from this runtime environment, so live runs can finish with warning-level gaps in official macro source coverage
+
+### First-Run Gate
+
+One fresh-checkout success path for the currently supported cohort is:
+
+1. run `uv sync --dev`
+2. set `OVERNIGHT_ADMIN_API_KEY` and `OVERNIGHT_PREMIUM_API_KEY` in `.env.local` or process env
+3. start `uv run python -m uvicorn app.main:app --host 127.0.0.1 --port 8000`
+4. verify `GET /healthz`, authenticated `GET /readyz`, and `GET /api/v1/news?limit=3`
+5. run one real backend evidence pass with `.venv/bin/python -m app.backend_live_run_evidence --analysis-date 2026-04-16`
+
+Degraded-but-acceptable first-run states:
+
+- without `IFIND_REFRESH_TOKEN`, market snapshot can still complete through Treasury/Stooq fallback, but coverage may be thinner
+- without `ALPHA_VANTAGE_API_KEY`, ticker enrichment remains skipped while fixed reports still generate
+- if BLS official pages return 403, the live run can still finish, but the release verdict remains beta rather than product-complete
+
+Primary failure modes and next step:
+
+- `401` / `403` on `readyz` or mutation routes: check `OVERNIGHT_ADMIN_API_KEY`
+- premium read routes rejected: check `OVERNIGHT_PREMIUM_API_KEY`
+- `uv sync --dev` or `uvicorn` startup fails: fix the local Python/uv environment before judging product readiness
+- live run health stays `warn`: inspect source diagnostics first, especially BLS 403 and rate-limited upstreams
+
+The detailed audit and first-run verdict are recorded in [docs/technical/2026-04-16-user-release-boundary-and-first-run-verdict.md](/Users/boyuewu/Documents/Projects/AIProjects/overnight-news-handoff/docs/technical/2026-04-16-user-release-boundary-and-first-run-verdict.md).
+
 <!-- readme-parity:current-output-layers -->
 ## Current Output Layers
 

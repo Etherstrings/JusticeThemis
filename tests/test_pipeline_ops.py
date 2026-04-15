@@ -112,6 +112,23 @@ def test_pipeline_health_service_allows_zero_new_items_when_recent_window_exists
     assert any("no new items" in issue for issue in health["warnings"])
 
 
+def test_pipeline_health_service_does_not_warn_for_low_new_item_delta_when_recent_window_is_healthy() -> None:
+    service = PipelineHealthService()
+    summary = _healthy_summary()
+    summary["capture"] = {
+        "status": "ok",
+        "collected_sources": 29,
+        "collected_items": 2,
+        "recent_total": 20,
+    }
+
+    health = service.evaluate(summary)
+
+    assert health["status"] == "ok"
+    assert health["blocking_issues"] == []
+    assert "capture volume looks thin" not in health["warnings"]
+
+
 def test_pipeline_health_service_warns_when_mission_critical_source_is_cooling_down() -> None:
     service = PipelineHealthService()
     summary = _healthy_summary()
@@ -314,6 +331,102 @@ def test_render_daily_report_markdown_includes_key_news_with_source_attribution(
     assert "金价延续三周涨势" in markdown
     assert "Oilprice World News | Fervo Locks In 1.7 GW Turbine Supply" in markdown
     assert "地热设备扩张强化能源投资主线" in markdown
+
+
+def test_render_daily_report_markdown_prefers_user_brief_and_includes_mainline_coverage_note() -> None:
+    report = {
+        "analysis_date": "2026-04-10",
+        "access_tier": "free",
+        "summary": {
+            "headline": "偏多方向：油服。",
+            "core_view": "当前市场快照存在核心缺口，市场板块并不完整。 暂未确认市场主线，原因包括：核心市场板块缺口、未触发明确 regime。",
+            "confidence": "medium",
+        },
+        "mainline_coverage": {
+            "status": "degraded",
+            "market_data_status": "partial",
+            "suppression_reasons": ["core_market_gap", "no_triggered_regime"],
+        },
+        "direction_calls": [],
+        "stock_calls": [],
+        "risk_watchpoints": ["市场快照核心板块仍有缺口，需补齐后再确认主线强度。"],
+        "headline_news": [
+            {
+                "item_id": 11,
+                "source_name": "White House News",
+                "title": "White House energy fact sheet",
+                "user_brief_cn": "白宫强调海上能源扩产，继续支撑油服链。",
+                "brief_source": "synthesized_cn",
+                "llm_ready_brief": "item_id=11 | White House News | authority=primary_official",
+                "impact_summary": "item_id=11 | White House News",
+            }
+        ],
+    }
+
+    markdown = render_daily_report_markdown(report)
+
+    assert "白宫强调海上能源扩产" in markdown
+    assert "item_id=11 | White House News | authority=primary_official" not in markdown
+    assert "当前市场快照存在核心缺口" in markdown
+
+
+def test_render_daily_report_markdown_includes_detailed_market_moves_and_driver_chain_sections() -> None:
+    report = {
+        "analysis_date": "2026-04-15",
+        "access_tier": "premium",
+        "summary": {
+            "headline": "偏多方向：油服；承压方向：化工下游成本敏感链。",
+            "core_view": "国际油价盘中拉升，市场正在重新交易霍尔木兹风险。",
+            "confidence": "medium",
+        },
+        "market_move_brief": {
+            "headline": "布伦特原油 +1.60%；WTI原油 +1.50%；黄金 -0.40%；美国10年期国债收益率 +0.06%。",
+            "cross_asset_moves": [
+                {"label": "布伦特原油", "change_pct": "+1.60%", "bucket": "energy"},
+                {"label": "WTI原油", "change_pct": "+1.50%", "bucket": "energy"},
+                {"label": "黄金", "change_pct": "-0.40%", "bucket": "precious_metals"},
+            ],
+            "strongest_move": {"label": "布伦特原油", "change_pct": "+1.60%"},
+            "weakest_move": {"label": "黄金", "change_pct": "-0.40%"},
+            "china_futures_watch": [
+                {
+                    "future_name": "PTA",
+                    "watch_direction": "up",
+                    "driver_summary": "布伦特原油 +1.60%；WTI原油 +1.50%。",
+                }
+            ],
+            "market_data_note": "当前市场板块数据不完整，部分板块仍需补齐。",
+        },
+        "event_drivers": [
+            {
+                "source_name": "White House News",
+                "title": "Trump team weighs additional Middle East deployment",
+                "user_brief_cn": "美方考虑进一步军事部署，霍尔木兹运输风险升温。",
+                "why_it_matters_cn": "这会先推升原油与运输风险溢价。",
+                "detail_facts": [
+                    "Brent=+1.60%(盘中涨幅)",
+                    "WTI=+1.50%(盘中涨幅)",
+                    "ICE 布油盘中突破 96 美元/桶。",
+                ],
+            }
+        ],
+        "editorial_chain_cn": "市场先交易布伦特原油 +1.60%、WTI原油 +1.50%，随后需要用 White House News 的中东增兵消息解释价格动作，落到 A 股映射则先看油服，成本承压链关注化工下游成本敏感链。",
+        "direction_calls": [],
+        "stock_calls": [],
+        "risk_watchpoints": ["确认霍尔木兹通行状态和增兵节奏。"],
+        "headline_news": [],
+    }
+
+    markdown = render_daily_report_markdown(report)
+
+    assert "## Market Moves" in markdown
+    assert "布伦特原油 +1.60%" in markdown
+    assert "最强异动" in markdown
+    assert "PTA" in markdown
+    assert "## Driver Chain" in markdown
+    assert "White House News" in markdown
+    assert "ICE 布油盘中突破 96 美元/桶" in markdown
+    assert "市场先交易布伦特原油 +1.60%" in markdown
 
 
 def test_resolve_health_exit_code_respects_warn_threshold() -> None:

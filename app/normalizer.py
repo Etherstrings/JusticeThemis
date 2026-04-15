@@ -3,8 +3,9 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 import hashlib
+import json
 import re
 from urllib.parse import urlsplit, urlunsplit
 
@@ -132,6 +133,7 @@ class NormalizedSourceItem:
     title_hash: str
     body_hash: str
     content_hash: str
+    source_context: dict[str, object] = field(default_factory=dict)
     capture_path: str = "direct"
     capture_provider: str = ""
     article_fetch_status: str = "not_attempted"
@@ -143,10 +145,12 @@ def normalize_candidate(candidate: SourceCandidate) -> NormalizedSourceItem:
     title = candidate.candidate_title.strip()
     summary = candidate.candidate_summary.strip()
     document_type = _infer_document_type(candidate)
-    entities = _extract_entities(title, summary)
+    source_context = _normalize_source_context(candidate.source_context)
+    entities = _extract_entities(title, summary, extra_names=candidate.candidate_entity_names)
     numeric_facts = _extract_numeric_facts(title, summary)
     body_text = summary or title
-    content_text = "\n".join(part for part in (title, summary) if part)
+    source_context_text = json.dumps(source_context, ensure_ascii=True, sort_keys=True) if source_context else ""
+    content_text = "\n".join(part for part in (title, summary, source_context_text) if part)
 
     return NormalizedSourceItem(
         canonical_url=canonical_url,
@@ -161,6 +165,7 @@ def normalize_candidate(candidate: SourceCandidate) -> NormalizedSourceItem:
         title_hash=_stable_hash(title),
         body_hash=_stable_hash(body_text),
         content_hash=_stable_hash(content_text),
+        source_context=source_context,
         capture_path=(candidate.capture_path or "direct").strip() or "direct",
         capture_provider=(candidate.capture_provider or "").strip(),
         article_fetch_status=(candidate.article_fetch_status or "not_attempted").strip() or "not_attempted",
@@ -193,7 +198,7 @@ def _infer_document_type(candidate: SourceCandidate) -> str:
     return "news_article"
 
 
-def _extract_entities(title: str, summary: str) -> tuple[EntityMention, ...]:
+def _extract_entities(title: str, summary: str, *, extra_names: tuple[str, ...] = ()) -> tuple[EntityMention, ...]:
     text = "\n".join(part for part in (title, summary) if part)
     entities: list[EntityMention] = []
     seen: set[tuple[str, str]] = set()
@@ -214,7 +219,29 @@ def _extract_entities(title: str, summary: str) -> tuple[EntityMention, ...]:
             )
         )
 
+    for raw_name in extra_names:
+        name = str(raw_name or "").strip()
+        if not name:
+            continue
+        key = (name, "source_entity")
+        if key in seen:
+            continue
+        seen.add(key)
+        entities.append(
+            EntityMention(
+                name=name,
+                entity_type="source_entity",
+                matched_text=name,
+            )
+        )
+
     return tuple(entities)
+
+
+def _normalize_source_context(source_context: dict[str, object] | None) -> dict[str, object]:
+    if not isinstance(source_context, dict):
+        return {}
+    return json.loads(json.dumps(source_context, ensure_ascii=False, sort_keys=True))
 
 
 def _extract_numeric_facts(title: str, summary: str) -> tuple[NumericFact, ...]:

@@ -6,6 +6,7 @@ from __future__ import annotations
 from dataclasses import replace
 from datetime import datetime, timedelta, timezone
 import hashlib
+import json
 import logging
 import re
 from typing import Any, Callable
@@ -15,6 +16,7 @@ from zoneinfo import ZoneInfo
 from app.collectors.article import ArticleCollector
 from app.collectors.calendar import CalendarCollector
 from app.collectors.feed import FeedCollector
+from app.collectors.readhub import ReadhubDailyCollector
 from app.collectors.section import SectionCollector
 from app.normalizer import NumericFact, format_numeric_fact_value, normalize_candidate
 from app.repository import OvernightRepository
@@ -208,6 +210,7 @@ class OvernightSourceCaptureService:
         self._search_discovery_service = search_discovery_service or SearchDiscoveryService.from_environment()
         self._now_fn = now_fn or (lambda: datetime.now(timezone.utc))
         self._section_collector = SectionCollector(http_client=self.http_client)
+        self._readhub_collector = ReadhubDailyCollector(http_client=self.http_client)
         self._feed_collector = FeedCollector(http_client=self.http_client)
         self._calendar_collector = CalendarCollector(http_client=self.http_client)
         self._article_collector = ArticleCollector(http_client=self.http_client)
@@ -411,6 +414,8 @@ class OvernightSourceCaptureService:
         return urlunsplit((parts.scheme.lower(), parts.netloc.lower(), path, "", ""))
 
     def _collector_for_source(self, source: SourceDefinition):
+        if source.source_id == "readhub_daily_digest":
+            return self._readhub_collector
         if source.entry_type == "rss":
             return self._feed_collector
         if source.entry_type == "section_page":
@@ -640,6 +645,8 @@ class OvernightSourceCaptureService:
                 candidate.candidate_summary.strip(),
                 (candidate.candidate_published_at or "").strip(),
                 candidate.candidate_published_at_source.strip(),
+                ",".join(candidate.candidate_entity_names),
+                json.dumps(candidate.source_context or {}, ensure_ascii=True, sort_keys=True),
             ]
         )
         return hashlib.sha256(payload.encode("utf-8")).hexdigest()
@@ -904,6 +911,7 @@ class OvernightSourceCaptureService:
             ),
             "entities": list(row.get("entities", []) or []),
             "numeric_facts": list(numeric_facts),
+            "source_context": dict(row.get("source_context", {}) or {}),
             "content_metrics": content_metrics,
             "content_completeness": self._content_completeness(
                 summary_quality=summary_quality,

@@ -58,17 +58,22 @@ class DailyAnalysisService:
         recent_limit: int = 200,
     ) -> dict[str, Any]:
         resolved_date = self._resolve_analysis_date(analysis_date)
-        items = self._items_for_analysis_date(
-            self.capture_service.list_recent_items(limit=recent_limit).get("items", []),
-            analysis_date=resolved_date,
-        )
         market_snapshot = (
             self.market_snapshot_service.get_daily_snapshot(analysis_date=resolved_date)
             if self.market_snapshot_service is not None
             else None
         )
+        items = self._items_for_analysis_dates(
+            self.capture_service.list_recent_items(limit=recent_limit).get("items", []),
+            analysis_dates=self._news_window_dates(
+                analysis_date=resolved_date,
+                market_snapshot=market_snapshot,
+            ),
+        )
         mainline_context = self._build_mainline_context(items=items, market_snapshot=market_snapshot)
         mainlines = list(mainline_context.get("mainlines", []) or [])
+        mainline_coverage = dict(mainline_context.get("coverage_state", {}) or {})
+        market_context = dict(mainline_context.get("market_context", {}) or {})
         reports: list[dict[str, Any]] = []
         input_item_ids = [int(item.get("item_id", 0) or 0) for item in items]
         for access_tier in ("free", "premium"):
@@ -78,9 +83,13 @@ class DailyAnalysisService:
                 items=items,
                 market_snapshot=market_snapshot,
                 mainlines=mainlines,
+                mainline_coverage=mainline_coverage,
+                market_context=market_context,
             )
             report["market_regimes"] = list(mainline_context.get("market_regimes", []) or [])
             report["secondary_event_groups"] = list(mainline_context.get("secondary_event_groups", []) or [])
+            report["mainline_coverage"] = dict(report.get("mainline_coverage", {}) or mainline_coverage)
+            report["market_context"] = dict(report.get("market_context", {}) or market_context)
             report["ticker_enrichments"] = []
             report["enrichment_summary"] = {
                 "status": "skipped",
@@ -124,13 +133,36 @@ class DailyAnalysisService:
         items: list[dict[str, Any]],
         market_snapshot: dict[str, Any] | None,
     ) -> dict[str, Any]:
+        market_context = self._market_context_from_snapshot(market_snapshot)
         if not isinstance(market_snapshot, dict):
-            return {"market_regimes": [], "mainlines": [], "secondary_event_groups": []}
+            return {
+                "market_regimes": [],
+                "mainlines": [],
+                "secondary_event_groups": [],
+                "coverage_state": {
+                    "status": "unavailable",
+                    "market_data_status": str(market_context.get("market_data_status", "missing")).strip() or "missing",
+                    "suppression_reasons": ["market_snapshot_missing"],
+                    "secondary_group_count": 0,
+                },
+                "market_context": market_context,
+            }
         market_board = market_snapshot.get("asset_board")
         if not isinstance(market_board, dict):
             market_board = market_snapshot
         if not isinstance(market_board, dict):
-            return {"market_regimes": [], "mainlines": [], "secondary_event_groups": []}
+            return {
+                "market_regimes": [],
+                "mainlines": [],
+                "secondary_event_groups": [],
+                "coverage_state": {
+                    "status": "unavailable",
+                    "market_data_status": str(market_context.get("market_data_status", "missing")).strip() or "missing",
+                    "suppression_reasons": ["market_board_missing"],
+                    "secondary_group_count": 0,
+                },
+                "market_context": market_context,
+            }
 
         event_groups = self._build_event_groups(items)
         market_regimes = list(market_snapshot.get("market_regimes", []) or [])
@@ -142,10 +174,20 @@ class DailyAnalysisService:
                 market_regime_evaluations=market_regime_evaluations,
                 event_groups=event_groups,
             )
+            mainlines = list(result.get("mainlines", []) or [])
+            secondary_event_groups = list(result.get("secondary_event_groups", []) or [])
             return {
                 "market_regimes": market_regimes,
-                "mainlines": list(result.get("mainlines", []) or []),
-                "secondary_event_groups": list(result.get("secondary_event_groups", []) or []),
+                "mainlines": mainlines,
+                "secondary_event_groups": secondary_event_groups,
+                "coverage_state": self._coverage_state(
+                    market_context=market_context,
+                    market_regimes=market_regimes,
+                    mainlines=mainlines,
+                    event_groups=event_groups,
+                    secondary_event_groups=secondary_event_groups,
+                ),
+                "market_context": market_context,
             }
 
         grouped: dict[str, dict[str, Any]] = {}
@@ -171,11 +213,34 @@ class DailyAnalysisService:
             event["affected_assets"] = list(dict.fromkeys(event["affected_assets"]))
             events.append(event)
         if not events:
-            return {"market_regimes": [], "mainlines": [], "secondary_event_groups": []}
+            secondary_event_groups: list[dict[str, Any]] = []
+            return {
+                "market_regimes": [],
+                "mainlines": [],
+                "secondary_event_groups": secondary_event_groups,
+                "coverage_state": self._coverage_state(
+                    market_context=market_context,
+                    market_regimes=[],
+                    mainlines=[],
+                    event_groups=[],
+                    secondary_event_groups=secondary_event_groups,
+                ),
+                "market_context": market_context,
+            }
+        mainlines = self.mainline_engine.build(market_board=market_board, events=events)
+        secondary_event_groups = []
         return {
             "market_regimes": [],
-            "mainlines": self.mainline_engine.build(market_board=market_board, events=events),
-            "secondary_event_groups": [],
+            "mainlines": mainlines,
+            "secondary_event_groups": secondary_event_groups,
+            "coverage_state": self._coverage_state(
+                market_context=market_context,
+                market_regimes=[],
+                mainlines=mainlines,
+                event_groups=event_groups,
+                secondary_event_groups=secondary_event_groups,
+            ),
+            "market_context": market_context,
         }
 
     def _build_event_groups(self, items: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -211,6 +276,72 @@ class DailyAnalysisService:
                 if candidate:
                     affected_assets.append(candidate)
         return affected_assets
+
+    def _market_context_from_snapshot(self, market_snapshot: dict[str, Any] | None) -> dict[str, Any]:
+        if not isinstance(market_snapshot, dict):
+            return {
+                "capture_status": "missing",
+                "market_data_status": "missing",
+                "missing_symbols": [],
+                "core_missing_symbols": [],
+                "captured_instrument_count": 0,
+            }
+        capture_summary = dict(market_snapshot.get("capture_summary", {}) or {})
+        capture_status = str(capture_summary.get("capture_status", "")).strip() or "complete"
+        missing_symbols = [str(symbol).strip() for symbol in list(capture_summary.get("missing_symbols", []) or []) if str(symbol).strip()]
+        core_missing_symbols = [
+            str(symbol).strip()
+            for symbol in list(capture_summary.get("core_missing_symbols", []) or [])
+            if str(symbol).strip()
+        ]
+        market_data_status = "complete"
+        if capture_status == "partial" or core_missing_symbols:
+            market_data_status = "partial"
+        elif capture_status in {"missing", "error"}:
+            market_data_status = "missing"
+        return {
+            "capture_status": capture_status,
+            "market_data_status": market_data_status,
+            "missing_symbols": missing_symbols,
+            "core_missing_symbols": core_missing_symbols,
+            "captured_instrument_count": int(capture_summary.get("captured_instrument_count", 0) or 0),
+        }
+
+    def _coverage_state(
+        self,
+        *,
+        market_context: dict[str, Any],
+        market_regimes: list[dict[str, Any]],
+        mainlines: list[dict[str, Any]],
+        event_groups: list[dict[str, Any]],
+        secondary_event_groups: list[dict[str, Any]],
+    ) -> dict[str, Any]:
+        suppression_reasons: list[str] = []
+        market_data_status = str(market_context.get("market_data_status", "missing")).strip() or "missing"
+        if list(market_context.get("core_missing_symbols", []) or []):
+            suppression_reasons.append("core_market_gap")
+        if market_data_status == "missing":
+            suppression_reasons.append("market_snapshot_missing")
+        if not market_regimes:
+            suppression_reasons.append("no_triggered_regime")
+        if event_groups and not mainlines:
+            suppression_reasons.append("no_linked_event_group")
+        if not event_groups:
+            suppression_reasons.append("no_relevant_event_group")
+
+        if mainlines or market_regimes:
+            status = "confirmed"
+        elif market_data_status != "complete" or secondary_event_groups or event_groups:
+            status = "degraded"
+        else:
+            status = "unavailable"
+
+        return {
+            "status": status,
+            "market_data_status": market_data_status,
+            "suppression_reasons": list(dict.fromkeys(suppression_reasons)),
+            "secondary_group_count": len(secondary_event_groups),
+        }
 
     def get_daily_report(
         self,
@@ -301,6 +432,18 @@ class DailyAnalysisService:
         if candidate:
             return candidate
         return datetime.now().date().isoformat()
+
+    def _news_window_dates(
+        self,
+        *,
+        analysis_date: str,
+        market_snapshot: dict[str, Any] | None,
+    ) -> list[str]:
+        dates = [str(analysis_date or "").strip()]
+        market_date = str(dict(market_snapshot or {}).get("market_date", "")).strip()
+        if market_date and market_date not in dates:
+            dates.append(market_date)
+        return [date for date in dates if date]
 
     def _build_source_audit_pack(self, report: dict[str, Any]) -> dict[str, Any]:
         supporting_items = list(report.get("supporting_items", []) or [])
@@ -403,10 +546,14 @@ class DailyAnalysisService:
         }
 
     def _items_for_analysis_date(self, items: list[dict[str, Any]], *, analysis_date: str) -> list[dict[str, Any]]:
+        return self._items_for_analysis_dates(items, analysis_dates=[analysis_date])
+
+    def _items_for_analysis_dates(self, items: list[dict[str, Any]], *, analysis_dates: list[str]) -> list[dict[str, Any]]:
+        candidate_dates = [str(date).strip() for date in analysis_dates if str(date).strip()]
         filtered = [
             item
             for item in items
-            if self._matches_analysis_date(item, analysis_date=analysis_date)
+            if any(self._matches_analysis_date(item, analysis_date=analysis_date) for analysis_date in candidate_dates)
         ]
         filtered = filter_current_window_items(filtered)
         filtered.sort(

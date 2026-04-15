@@ -3,6 +3,12 @@
 > **项目：** `JusticeThemis`  
 > **目的：** 把当前“能跑的后端 MVP”收敛成“可独立部署、边界清晰、可自托管上线”的发布基线。
 
+## 当前结论更新
+
+这份文档记录的是 2026-04-11 的 release-hardening 基线，不再单独承担最新 release verdict。
+
+截至 2026-04-16，当前面向用户的正式结论、支持边界、first-run gate、降级说明和阻断项统一记录在 [docs/technical/2026-04-16-user-release-boundary-and-first-run-verdict.md](/Users/boyuewu/Documents/Projects/AIProjects/overnight-news-handoff/docs/technical/2026-04-16-user-release-boundary-and-first-run-verdict.md)。
+
 ## 已完成
 
 1. 运行时配置已从外部仓库默认依赖中脱钩
