@@ -2,11 +2,33 @@
 
 [English](README.md)
 
+<div align="center">
+
+**把隔夜全球信号流压成中国早晨能真正执行的市场判断。**
+
+![FastAPI](https://img.shields.io/badge/FastAPI-Service-059669?style=flat-square&logo=fastapi&logoColor=white)
+![Overnight Intel](https://img.shields.io/badge/Overnight-Intel-1F2937?style=flat-square)
+![Self Hosted](https://img.shields.io/badge/Mode-Self_Hosted-0F766E?style=flat-square)
+![API](https://img.shields.io/badge/Surface-API-1D4ED8?style=flat-square)
+![Daily Analysis](https://img.shields.io/badge/Output-Daily_Analysis-7C3AED?style=flat-square)
+
+隔夜源采集 · 美股收盘快照 · 固定日报 · MMU handoff
+
+[English README](README.md) · [赞助支持](#donate)
+
+</div>
+
 这是根级中文 bootstrap companion 文档。默认入口仍然是 [README.md](README.md)。
 
 JusticeThemis 是一个独立运行的隔夜国际新闻采集、美国收盘快照、固定中国早晨分析缓存，以及下游 LLM/MMU 导出服务。
 
 它的定位不是一个单纯的下游交接工具，而是面向中国早晨工作流的结果优先型隔夜市场解读引擎。
+
+## <a id="donate"></a>赞助支持
+
+如果 JusticeThemis 对你的研究或晨间工作流有帮助，欢迎通过 GitHub Sponsors 支持后续维护：
+
+- GitHub Sponsors: https://github.com/sponsors/Etherstrings
 
 <!-- readme-parity:what-it-does -->
 ## 功能概览

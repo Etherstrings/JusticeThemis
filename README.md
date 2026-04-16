@@ -2,11 +2,33 @@
 
 [中文](README.zh.md)
 
+<div align="center">
+
+**Turn overnight global signal flow into a China-morning market read your operator can actually act on.**
+
+![FastAPI](https://img.shields.io/badge/FastAPI-Service-059669?style=flat-square&logo=fastapi&logoColor=white)
+![Overnight Intel](https://img.shields.io/badge/Overnight-Intel-1F2937?style=flat-square)
+![Self Hosted](https://img.shields.io/badge/Mode-Self_Hosted-0F766E?style=flat-square)
+![API](https://img.shields.io/badge/Surface-API-1D4ED8?style=flat-square)
+![Daily Analysis](https://img.shields.io/badge/Output-Daily_Analysis-7C3AED?style=flat-square)
+
+Overnight sources · U.S. close snapshot · fixed daily reports · MMU handoff
+
+[Local Startup](#local-startup) · [Smoke Check](#smoke-check) · [Support](#support)
+
+</div>
+
 This is the default bootstrap entrypoint for the standalone `JusticeThemis` repository. For the Chinese bootstrap companion, see [README.zh.md](README.zh.md).
 
 JusticeThemis is a standalone overnight international-news capture, U.S. market-close snapshot, fixed China-morning analysis cache, and downstream LLM/MMU export service.
 
 It is positioned as a result-first overnight market interpretation engine for the China-morning workflow, not just a downstream handoff tool.
+
+## <a id="support"></a>Support
+
+If JusticeThemis helps your research or China-morning workflow, you can support ongoing maintenance via GitHub Sponsors:
+
+- GitHub Sponsors: https://github.com/sponsors/Etherstrings
 
 <!-- readme-parity:what-it-does -->
 ## What It Does
