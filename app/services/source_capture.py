@@ -58,6 +58,38 @@ _ENERGY_TOPIC_PATTERN = re.compile(
     r"\b(?:oil|crude|shipping|freight|hormuz|lng|natural gas|energy)\b",
     re.IGNORECASE,
 )
+_GOLD_TOPIC_PATTERN = re.compile(
+    r"\b(?:gold|bullion|comex gold|gold futures|gold market|gold demand|central bank gold|gold reserve|gold reserves|precious metal|precious metals|metals markets)\b",
+    re.IGNORECASE,
+)
+_SILVER_TOPIC_PATTERN = re.compile(
+    r"\b(?:silver|silver imports|silver market|bullion|metals markets)\b",
+    re.IGNORECASE,
+)
+_COPPER_TOPIC_PATTERN = re.compile(
+    r"\b(?:copper|comex copper|lme copper|refined copper)\b",
+    re.IGNORECASE,
+)
+_ALUMINUM_TOPIC_PATTERN = re.compile(
+    r"\b(?:aluminum|aluminium|primary aluminum|primary aluminium)\b",
+    re.IGNORECASE,
+)
+_INDUSTRIAL_METALS_TOPIC_PATTERN = re.compile(
+    r"\b(?:critical minerals|mining|minerals|mineral processing|smelter|sulfuric acid|sx-ew|ore supply)\b",
+    re.IGNORECASE,
+)
+_HONG_KONG_TOPIC_PATTERN = re.compile(
+    r"\b(?:hong kong|hang seng|hsi|hong kong stocks|hong kong shares|h-shares|h shares)\b",
+    re.IGNORECASE,
+)
+_CHINA_INTERNET_TOPIC_PATTERN = re.compile(
+    r"\b(?:china tech|chinese tech|china internet|kweb|fxi|adr|adrs|alibaba|jd\.com|netease|tencent|meituan|pdd|trip\.com)\b",
+    re.IGNORECASE,
+)
+_CHINA_PROPERTY_TOPIC_PATTERN = re.compile(
+    r"\b(?:china property|chinese property|property developer|developers|housing market|real estate)\b",
+    re.IGNORECASE,
+)
 _SEMICONDUCTOR_TOPIC_PATTERN = re.compile(
     r"\b(?:semiconductor|chip|chips|wafer|gpu|critical mineral)\b",
     re.IGNORECASE,
@@ -83,7 +115,23 @@ _SEARCH_SUMMARY_POSITIVE_MARKERS = (
     "forces",
 )
 _LOW_SIGNAL_TITLE_PATTERN = re.compile(r"\b(?:public schedule|daily schedule|schedule)\b", re.IGNORECASE)
+_INDUSTRIAL_PRIORITY_TITLE_PATTERN = re.compile(
+    r"\b(?:aluminium|aluminum|steel|copper|smelter|lme|critical minerals|mining|ore|raw materials)\b",
+    re.IGNORECASE,
+)
+_INDUSTRIAL_DEPRIORITY_TITLE_PATTERN = re.compile(
+    r"\b(?:timber|pulp|paper|board|fibers?|nonwovens?|biodiesel|eua prices?)\b",
+    re.IGNORECASE,
+)
 _TOPIC_PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
+    ("gold_market", _GOLD_TOPIC_PATTERN),
+    ("silver_market", _SILVER_TOPIC_PATTERN),
+    ("copper_market", _COPPER_TOPIC_PATTERN),
+    ("aluminum_market", _ALUMINUM_TOPIC_PATTERN),
+    ("industrial_metals", _INDUSTRIAL_METALS_TOPIC_PATTERN),
+    ("hong_kong_market", _HONG_KONG_TOPIC_PATTERN),
+    ("china_internet", _CHINA_INTERNET_TOPIC_PATTERN),
+    ("china_property", _CHINA_PROPERTY_TOPIC_PATTERN),
     ("trade_policy", _TRADE_TOPIC_PATTERN),
     ("rates_macro", _RATES_TOPIC_PATTERN),
     ("energy_shipping", _ENERGY_TOPIC_PATTERN),
@@ -289,12 +337,17 @@ class OvernightSourceCaptureService:
                 collected_sources += 1
 
             persisted_count = 0
+            published_at_conflict_count = 0
             for candidate in candidates:
                 stored = self._persist_candidate(source, candidate)
                 if stored is None:
                     continue
                 collected_items += 1
                 persisted_count += 1
+                source_context = dict(getattr(stored, "source_context", {}) or {})
+                published_at_diagnostics = dict(source_context.get("published_at_diagnostics", {}) or {})
+                if bool(published_at_diagnostics.get("published_at_conflict")):
+                    published_at_conflict_count += 1
 
             diagnostic = self._record_source_attempt(
                 source=source,
@@ -303,6 +356,7 @@ class OvernightSourceCaptureService:
                 candidate_count=len(ranked_candidates),
                 selected_candidate_count=len(candidates),
                 persisted_count=persisted_count,
+                published_at_conflict_count=published_at_conflict_count,
                 errors=list(collect_diagnostics.get("errors", []) or []),
                 search_discovery_used=bool(collect_diagnostics.get("search_discovery_used", False)),
             )
@@ -499,6 +553,7 @@ class OvernightSourceCaptureService:
         candidate_count: int,
         selected_candidate_count: int,
         persisted_count: int,
+        published_at_conflict_count: int,
         errors: list[str],
         search_discovery_used: bool,
     ) -> dict[str, object]:
@@ -537,6 +592,7 @@ class OvernightSourceCaptureService:
             "candidate_count": candidate_count,
             "selected_candidate_count": selected_candidate_count,
             "persisted_count": persisted_count,
+            "published_at_conflict_count": published_at_conflict_count,
             "search_discovery_used": search_discovery_used,
             "error_count": len(errors),
             "errors": errors[:4],
@@ -652,6 +708,10 @@ class OvernightSourceCaptureService:
         return hashlib.sha256(payload.encode("utf-8")).hexdigest()
 
     def _is_identical_persisted_item(self, *, existing: object, normalized: object) -> bool:
+        existing_source_context = dict(getattr(existing, "source_context", {}) or {})
+        normalized_source_context = dict(getattr(normalized, "source_context", {}) or {})
+        if existing_source_context.get("published_at_diagnostics") != normalized_source_context.get("published_at_diagnostics"):
+            return False
         return (
             str(getattr(existing, "canonical_url", "")).strip() == str(getattr(normalized, "canonical_url", "")).strip()
             and str(getattr(existing, "title_hash", "")).strip() == str(getattr(normalized, "title_hash", "")).strip()
@@ -708,6 +768,11 @@ class OvernightSourceCaptureService:
             score += 1
         if _LOW_SIGNAL_TITLE_PATTERN.search(candidate.candidate_title):
             score -= 4
+        if source.source_id in {"fastmarkets_markets", "mining_com_markets"}:
+            if _INDUSTRIAL_PRIORITY_TITLE_PATTERN.search(candidate.candidate_title):
+                score += 3
+            if _INDUSTRIAL_DEPRIORITY_TITLE_PATTERN.search(candidate.candidate_title):
+                score -= 3
         if candidate.candidate_excerpt_source.startswith("search:"):
             score += self._search_summary_quality_adjustment(candidate.candidate_summary)
         return score

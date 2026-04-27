@@ -22,8 +22,21 @@ SEARCH_PROVIDER_ENV_NAMES: tuple[str, ...] = (
     "SERPAPI_API_KEY",
     "BRAVE_API_KEYS",
     "BRAVE_API_KEY",
+    "AIHUBMIX_API_KEYS",
+    "AIHUBMIX_API_KEY",
+    "AIHUBMIX_BASE_URL",
+    "AIHUBMIX_SEARCH_MODEL",
 )
-MARKET_PROVIDER_ENV_NAMES: tuple[str, ...] = ("IFIND_REFRESH_TOKEN",)
+MARKET_PROVIDER_ENV_NAMES: tuple[str, ...] = (
+    "IFIND_REFRESH_TOKEN",
+    "POLYMARKET_ENABLED",
+    "POLYMARKET_SIGNAL_CONFIG_JSON",
+    "KALSHI_ENABLED",
+    "KALSHI_SIGNAL_CONFIG_JSON",
+    "CME_FEDWATCH_ENABLED",
+    "CFTC_ENABLED",
+    "CFTC_SIGNAL_CONFIG_JSON",
+)
 ENRICHMENT_PROVIDER_ENV_NAMES: tuple[str, ...] = (
     "ALPHA_VANTAGE_API_KEY",
     "ALPHAVANTAGE_API_KEY",
@@ -32,6 +45,7 @@ AUTH_ENV_NAMES: tuple[str, ...] = (
     "OVERNIGHT_PREMIUM_API_KEY",
     "OVERNIGHT_ADMIN_API_KEY",
     "OVERNIGHT_ALLOW_UNSAFE_ADMIN",
+    "OVERNIGHT_FRONTEND_ALLOWED_ORIGINS",
 )
 RUNTIME_ENV_NAMES: tuple[str, ...] = (
     SEARCH_PROVIDER_ENV_NAMES
@@ -93,6 +107,24 @@ def list_existing_env_files(env_file_paths: Sequence[Path | str] | None = None) 
 
 def env_flag_enabled(name: str) -> bool:
     return str(os.environ.get(name, "")).strip().lower() in {"1", "true", "yes", "on"}
+
+
+def list_frontend_allowed_origins() -> list[str]:
+    defaults = [
+        origin
+        for port in range(5173, 5181)
+        for origin in (f"http://127.0.0.1:{port}", f"http://localhost:{port}")
+    ]
+    configured = [
+        origin.strip()
+        for origin in str(os.environ.get("OVERNIGHT_FRONTEND_ALLOWED_ORIGINS", "")).split(",")
+        if origin.strip()
+    ]
+    ordered: list[str] = []
+    for origin in [*defaults, *configured]:
+        if origin not in ordered:
+            ordered.append(origin)
+    return ordered
 
 
 def _parse_env_line(line: str) -> tuple[str, str] | None:

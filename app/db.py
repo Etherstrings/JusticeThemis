@@ -36,6 +36,7 @@ CREATE TABLE IF NOT EXISTS overnight_source_refresh_state (
     last_candidate_count INTEGER NOT NULL DEFAULT 0,
     last_selected_candidate_count INTEGER NOT NULL DEFAULT 0,
     last_persisted_count INTEGER NOT NULL DEFAULT 0,
+    last_published_at_conflict_count INTEGER NOT NULL DEFAULT 0,
     last_elapsed_seconds REAL NOT NULL DEFAULT 0,
     updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
@@ -209,6 +210,10 @@ _REQUIRED_SOURCE_ITEM_COLUMNS: tuple[tuple[str, str], ...] = (
     ("source_context_json", "TEXT NOT NULL DEFAULT '{}'"),
 )
 
+_REQUIRED_SOURCE_REFRESH_STATE_COLUMNS: tuple[tuple[str, str], ...] = (
+    ("last_published_at_conflict_count", "INTEGER NOT NULL DEFAULT 0"),
+)
+
 
 class Database:
     """Small SQLite helper scoped to this standalone project."""
@@ -236,13 +241,31 @@ class Database:
             self._ensure_required_columns(connection)
 
     def _ensure_required_columns(self, connection: sqlite3.Connection) -> None:
+        self._ensure_table_columns(
+            connection,
+            table_name="overnight_source_items",
+            required_columns=_REQUIRED_SOURCE_ITEM_COLUMNS,
+        )
+        self._ensure_table_columns(
+            connection,
+            table_name="overnight_source_refresh_state",
+            required_columns=_REQUIRED_SOURCE_REFRESH_STATE_COLUMNS,
+        )
+
+    def _ensure_table_columns(
+        self,
+        connection: sqlite3.Connection,
+        *,
+        table_name: str,
+        required_columns: tuple[tuple[str, str], ...],
+    ) -> None:
         existing_columns = {
             row["name"]
-            for row in connection.execute("PRAGMA table_info(overnight_source_items)").fetchall()
+            for row in connection.execute(f"PRAGMA table_info({table_name})").fetchall()
         }
-        for column_name, column_definition in _REQUIRED_SOURCE_ITEM_COLUMNS:
+        for column_name, column_definition in required_columns:
             if column_name in existing_columns:
                 continue
             connection.execute(
-                f"ALTER TABLE overnight_source_items ADD COLUMN {column_name} {column_definition}"
+                f"ALTER TABLE {table_name} ADD COLUMN {column_name} {column_definition}"
             )

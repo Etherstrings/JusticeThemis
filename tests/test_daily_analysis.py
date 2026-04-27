@@ -188,7 +188,11 @@ def test_generate_daily_analysis_creates_fixed_free_and_premium_versions(monkeyp
         assert "fact_conflicts" in payload["reports"][0]["supporting_items"][0]
         assert "event_cluster" in payload["reports"][0]["supporting_items"][0]
         assert payload["reports"][0]["supporting_items"][0]["llm_ready_brief"]
+        assert payload["reports"][0]["product_view"]["at_a_glance"]["analysis_date"] == "2026-04-07"
+        assert payload["reports"][0]["product_view"]["sector_judgments"]
+        assert payload["reports"][0]["product_view"]["evidence_chain"]
         assert payload["reports"][1]["stock_calls"]
+        assert payload["reports"][1]["product_view"]["stock_judgments"]
 
 
 def test_rule_based_daily_analysis_builds_headline_news_with_official_and_editorial_mix() -> None:
@@ -331,6 +335,428 @@ def test_rule_based_daily_analysis_builds_headline_news_with_official_and_editor
     assert any(item["coverage_tier"] == "official_policy" or item["coverage_tier"] == "official_data" for item in headline_news)
     assert any(item["coverage_tier"] == "editorial_media" for item in headline_news)
     assert any(item["source_id"] == "kitco_news" for item in headline_news)
+
+
+def test_rule_based_daily_analysis_emits_wider_result_first_materials_pool() -> None:
+    provider = RuleBasedDailyAnalysisProvider()
+
+    def make_item(item_id: int, source_id: str, coverage_tier: str) -> dict[str, object]:
+        return {
+            "item_id": item_id,
+            "source_id": source_id,
+            "source_name": source_id,
+            "title": f"title_{item_id}",
+            "coverage_tier": coverage_tier,
+            "priority": 100 - item_id,
+            "analysis_status": "ready" if item_id <= 4 else "review",
+            "analysis_confidence": "high" if item_id <= 4 else "medium",
+            "a_share_relevance": "high",
+            "source_capture_confidence": {"level": "high", "score": 90},
+            "cross_source_confirmation": {"level": "moderate", "supporting_source_count": 1},
+            "fact_conflicts": [],
+            "event_cluster": {
+                "cluster_id": f"cluster_{item_id // 2}",
+                "cluster_status": "confirmed",
+                "primary_item_id": item_id,
+                "item_count": 1,
+                "source_count": 1,
+                "official_source_count": 1 if coverage_tier != "editorial_media" else 0,
+                "member_item_ids": [item_id],
+                "member_source_ids": [source_id],
+                "latest_published_at": f"2026-04-07T0{item_id % 10}:00:00+00:00",
+                "topic_tags": ["macro_data"],
+                "fact_signatures": [],
+            },
+            "timeliness": {
+                "anchor_time": "2026-04-07T08:00:00+00:00",
+                "age_hours": 1.0,
+                "publication_lag_minutes": 20,
+                "freshness_bucket": "fresh",
+                "is_timely": True,
+                "timeliness_flags": [],
+            },
+            "beneficiary_directions": ["进口替代制造链"],
+            "pressured_directions": [],
+            "price_up_signals": [],
+            "follow_up_checks": ["确认执行细则。"],
+            "evidence_points": [f"evidence_{item_id}"],
+            "impact_summary": f"impact_{item_id}",
+            "llm_ready_brief": f"brief_{item_id}",
+        }
+
+    report = provider.generate_report(
+        analysis_date="2026-04-07",
+        access_tier="free",
+        items=[
+            make_item(1, "whitehouse_news", "official_policy"),
+            make_item(2, "fed_news", "official_data"),
+            make_item(3, "bea_news", "official_data"),
+            make_item(4, "treasury_press_releases", "official_policy"),
+            make_item(5, "ap_business", "editorial_media"),
+            make_item(6, "kitco_news", "editorial_media"),
+            make_item(7, "ap_world", "editorial_media"),
+            make_item(8, "cnbc_markets", "editorial_media"),
+            make_item(9, "ecb_press", "official_data"),
+            make_item(10, "oilprice_world_news", "editorial_media"),
+        ],
+    )
+
+    assert len(report["supporting_items"]) == 8
+    assert len(report["result_first_materials"]) > len(report["supporting_items"])
+    assert all(item["user_brief_cn"] for item in report["result_first_materials"])
+
+
+def test_rule_based_daily_analysis_prioritizes_market_explainers_in_result_first_materials() -> None:
+    provider = RuleBasedDailyAnalysisProvider()
+
+    def make_item(
+        item_id: int,
+        *,
+        source_id: str,
+        title: str,
+        coverage_tier: str = "official_policy",
+        priority: int = 100,
+        analysis_status: str = "ready",
+        analysis_confidence: str = "high",
+        topic_tags: list[str] | None = None,
+    ) -> dict[str, object]:
+        return {
+            "item_id": item_id,
+            "source_id": source_id,
+            "source_name": source_id,
+            "title": title,
+            "coverage_tier": coverage_tier,
+            "priority": priority,
+            "analysis_status": analysis_status,
+            "analysis_confidence": analysis_confidence,
+            "a_share_relevance": "high",
+            "source_capture_confidence": {"level": "high", "score": 90},
+            "cross_source_confirmation": {"level": "moderate", "supporting_source_count": 1},
+            "fact_conflicts": [],
+            "event_cluster": {
+                "cluster_id": f"cluster_{item_id}",
+                "cluster_status": "confirmed",
+                "primary_item_id": item_id,
+                "item_count": 1,
+                "source_count": 1,
+                "official_source_count": 1 if coverage_tier != "editorial_media" else 0,
+                "member_item_ids": [item_id],
+                "member_source_ids": [source_id],
+                "latest_published_at": f"2026-04-07T0{item_id % 10}:00:00+00:00",
+                "topic_tags": list(topic_tags or []),
+                "fact_signatures": [],
+            },
+            "timeliness": {
+                "anchor_time": "2026-04-07T08:00:00+00:00",
+                "age_hours": 1.0,
+                "publication_lag_minutes": 20,
+                "freshness_bucket": "fresh",
+                "is_timely": True,
+                "timeliness_flags": [],
+            },
+            "beneficiary_directions": ["进口替代制造链"],
+            "pressured_directions": [],
+            "price_up_signals": [],
+            "follow_up_checks": ["确认执行细则。"],
+            "evidence_points": [f"evidence_{item_id}"],
+            "impact_summary": f"impact_{item_id}",
+            "llm_ready_brief": f"brief_{item_id}",
+        }
+
+    filler_items = [
+        make_item(item_id, source_id=f"generic_source_{item_id}", title=f"Administrative notice {item_id}")
+        for item_id in range(1, 23)
+    ]
+    duplicate_cpi_items = [
+        make_item(23, source_id="bls_news_releases", title="Consumer Price Index", topic_tags=["inflation"]),
+        make_item(24, source_id="bls_news_releases", title="Consumer Price Index", topic_tags=["inflation"]),
+    ]
+    market_explainers = [
+        make_item(
+            25,
+            source_id="ap_financial_markets",
+            title="How Wall Street is setting records even with the Iran war still going on",
+            coverage_tier="editorial_media",
+            priority=45,
+            analysis_status="review",
+            analysis_confidence="medium",
+            topic_tags=["equity_market"],
+        ),
+        make_item(
+            26,
+            source_id="ap_business",
+            title="US stocks rally to records, but Brent oil also tops $100 on worries about the Iran war",
+            coverage_tier="editorial_media",
+            priority=42,
+            analysis_status="review",
+            analysis_confidence="medium",
+            topic_tags=["oil_market"],
+        ),
+        make_item(
+            27,
+            source_id="census_economic_indicators",
+            title="Advance Monthly Sales for Retail and Food Services",
+            coverage_tier="official_data",
+            priority=40,
+            analysis_status="review",
+            analysis_confidence="medium",
+        ),
+    ]
+
+    report = provider.generate_report(
+        analysis_date="2026-04-07",
+        access_tier="free",
+        items=[*filler_items, *duplicate_cpi_items, *market_explainers],
+    )
+
+    titles = [str(item["title"]) for item in report["result_first_materials"]]
+
+    assert "How Wall Street is setting records even with the Iran war still going on" in titles
+    assert "US stocks rally to records, but Brent oil also tops $100 on worries about the Iran war" in titles
+    assert "Advance Monthly Sales for Retail and Food Services" in titles
+    assert titles.count("Consumer Price Index") == 1
+
+
+def test_rule_based_daily_analysis_keeps_china_and_precious_bucket_guardrail_materials() -> None:
+    provider = RuleBasedDailyAnalysisProvider()
+
+    def make_item(
+        item_id: int,
+        *,
+        source_id: str,
+        title: str,
+        summary: str,
+        coverage_tier: str = "editorial_media",
+        topic_tags: list[str] | None = None,
+    ) -> dict[str, object]:
+        return {
+            "item_id": item_id,
+            "source_id": source_id,
+            "source_name": source_id,
+            "title": title,
+            "summary": summary,
+            "coverage_tier": coverage_tier,
+            "priority": 40,
+            "analysis_status": "review",
+            "analysis_confidence": "medium",
+            "a_share_relevance": "high",
+            "source_capture_confidence": {"level": "high", "score": 90},
+            "cross_source_confirmation": {"level": "moderate", "supporting_source_count": 1},
+            "fact_conflicts": [],
+            "event_cluster": {
+                "cluster_id": f"cluster_{item_id}",
+                "cluster_status": "confirmed",
+                "primary_item_id": item_id,
+                "item_count": 1,
+                "source_count": 1,
+                "official_source_count": 0,
+                "member_item_ids": [item_id],
+                "member_source_ids": [source_id],
+                "latest_published_at": f"2026-04-07T0{item_id % 10}:00:00+00:00",
+                "topic_tags": list(topic_tags or []),
+                "fact_signatures": [],
+            },
+            "timeliness": {
+                "anchor_time": "2026-04-07T08:00:00+00:00",
+                "age_hours": 1.0,
+                "publication_lag_minutes": 20,
+                "freshness_bucket": "fresh",
+                "is_timely": True,
+                "timeliness_flags": [],
+            },
+            "beneficiary_directions": ["进口替代制造链"],
+            "pressured_directions": [],
+            "price_up_signals": [],
+            "follow_up_checks": ["确认执行细则。"],
+            "evidence_points": [f"evidence_{item_id}"],
+            "impact_summary": f"impact_{item_id}",
+            "llm_ready_brief": f"brief_{item_id}",
+        }
+
+    filler_items = [
+        make_item(
+            item_id,
+            source_id=f"generic_source_{item_id}",
+            title=f"Administrative notice {item_id}",
+            summary="Generic notice without bucket-specific market meaning.",
+            coverage_tier="official_policy",
+            topic_tags=["macro_misc"],
+        )
+        for item_id in range(1, 25)
+    ]
+    china_item = make_item(
+        101,
+        source_id="scmp_markets",
+        title="Hong Kong and China stocks slip after Xiaomi fundraising dents sentiment",
+        summary="Hang Seng Tech and mainland Chinese stocks both turned lower overnight.",
+    )
+    precious_item = make_item(
+        102,
+        source_id="kitco_news",
+        title="Gold holds range as traders wait for central bank decisions",
+        summary="Bullion stayed soft into the close while traders watched gold and silver pricing.",
+    )
+
+    report = provider.generate_report(
+        analysis_date="2026-04-07",
+        access_tier="free",
+        items=[*filler_items, china_item, precious_item],
+    )
+
+    titles = [str(item["title"]) for item in report["result_first_materials"]]
+
+    assert china_item["title"] in titles
+    assert precious_item["title"] in titles
+
+
+def test_rule_based_daily_analysis_prioritizes_industrial_mining_summary_hints() -> None:
+    provider = RuleBasedDailyAnalysisProvider()
+
+    def make_item(item_id: int, *, source_id: str, title: str, summary: str) -> dict[str, object]:
+        return {
+            "item_id": item_id,
+            "source_id": source_id,
+            "source_name": source_id,
+            "title": title,
+            "summary": summary,
+            "coverage_tier": "editorial_media",
+            "priority": 40,
+            "analysis_status": "review",
+            "analysis_confidence": "medium",
+            "a_share_relevance": "high",
+            "source_capture_confidence": {"level": "high", "score": 90},
+            "cross_source_confirmation": {"level": "moderate", "supporting_source_count": 1},
+            "fact_conflicts": [],
+            "event_cluster": {
+                "cluster_id": f"cluster_{item_id}",
+                "cluster_status": "confirmed",
+                "primary_item_id": item_id,
+                "item_count": 1,
+                "source_count": 1,
+                "official_source_count": 0,
+                "member_item_ids": [item_id],
+                "member_source_ids": [source_id],
+                "latest_published_at": f"2026-04-07T0{item_id % 10}:00:00+00:00",
+                "topic_tags": [],
+                "fact_signatures": [],
+            },
+            "timeliness": {
+                "anchor_time": "2026-04-07T08:00:00+00:00",
+                "age_hours": 1.0,
+                "publication_lag_minutes": 20,
+                "freshness_bucket": "fresh",
+                "is_timely": True,
+                "timeliness_flags": [],
+            },
+            "beneficiary_directions": ["进口替代制造链"],
+            "pressured_directions": [],
+            "price_up_signals": [],
+            "follow_up_checks": ["确认执行细则。"],
+            "evidence_points": [f"evidence_{item_id}"],
+            "impact_summary": f"impact_{item_id}",
+            "llm_ready_brief": f"brief_{item_id}",
+        }
+
+    filler_items = [
+        make_item(
+            item_id,
+            source_id=f"generic_source_{item_id}",
+            title=f"Generic market note {item_id}",
+            summary="Generic cross-asset market note.",
+        )
+        for item_id in range(1, 25)
+    ]
+    industrial_item = make_item(
+        201,
+        source_id="mining_com_markets",
+        title="War squeezes global mining as diesel and acid supplies tighten",
+        summary="Sulfuric acid and SX-EW processing pressure are starting to hit copper supply.",
+    )
+
+    report = provider.generate_report(
+        analysis_date="2026-04-07",
+        access_tier="free",
+        items=[*filler_items, industrial_item],
+    )
+
+    titles = [str(item["title"]) for item in report["result_first_materials"]]
+
+    assert industrial_item["title"] in titles
+
+
+def test_rule_based_daily_analysis_bucket_guardrail_can_break_editorial_cap() -> None:
+    provider = RuleBasedDailyAnalysisProvider()
+
+    def make_item(item_id: int, *, source_id: str, title: str, summary: str) -> dict[str, object]:
+        return {
+            "item_id": item_id,
+            "source_id": source_id,
+            "source_name": source_id,
+            "title": title,
+            "summary": summary,
+            "coverage_tier": "editorial_media",
+            "priority": 40,
+            "analysis_status": "review",
+            "analysis_confidence": "medium",
+            "a_share_relevance": "high",
+            "source_capture_confidence": {"level": "high", "score": 90},
+            "cross_source_confirmation": {"level": "moderate", "supporting_source_count": 1},
+            "fact_conflicts": [],
+            "event_cluster": {
+                "cluster_id": f"cluster_{item_id}",
+                "cluster_status": "confirmed",
+                "primary_item_id": item_id,
+                "item_count": 1,
+                "source_count": 1,
+                "official_source_count": 0,
+                "member_item_ids": [item_id],
+                "member_source_ids": [source_id],
+                "latest_published_at": f"2026-04-07T0{item_id % 10}:00:00+00:00",
+                "topic_tags": [],
+                "fact_signatures": [],
+            },
+            "timeliness": {
+                "anchor_time": "2026-04-07T08:00:00+00:00",
+                "age_hours": 1.0,
+                "publication_lag_minutes": 20,
+                "freshness_bucket": "fresh",
+                "is_timely": True,
+                "timeliness_flags": [],
+            },
+            "beneficiary_directions": ["进口替代制造链"],
+            "pressured_directions": [],
+            "price_up_signals": [],
+            "follow_up_checks": ["确认执行细则。"],
+            "evidence_points": [f"evidence_{item_id}"],
+            "impact_summary": f"impact_{item_id}",
+            "llm_ready_brief": f"brief_{item_id}",
+        }
+
+    editorial_fillers = [
+        make_item(
+            item_id,
+            source_id=f"editorial_source_{item_id}",
+            title=f"Editorial filler {item_id}",
+            summary="Generic editorial filler.",
+        )
+        for item_id in range(1, 30)
+    ]
+    industrial_item = make_item(
+        301,
+        source_id="mining_com_markets",
+        title="War squeezes global mining as diesel and acid supplies tighten",
+        summary="Sulfuric acid and SX-EW processing pressure are starting to hit copper supply.",
+    )
+
+    report = provider.generate_report(
+        analysis_date="2026-04-07",
+        access_tier="free",
+        items=[*editorial_fillers, industrial_item],
+    )
+
+    titles = [str(item["title"]) for item in report["result_first_materials"]]
+
+    assert industrial_item["title"] in titles
 
 
 def test_rule_based_daily_analysis_reuses_mainlines_for_directions_and_stock_calls() -> None:
@@ -560,6 +986,42 @@ def test_get_daily_analysis_returns_latest_cached_report_and_premium_requires_ke
         assert any(call["ticker"] == "600583.SH" for call in premium_payload["stock_calls"])
 
 
+def test_get_daily_analysis_product_view_returns_frontend_ready_payload(monkeypatch) -> None:
+    with tempfile.TemporaryDirectory() as temp_dir:
+        monkeypatch.setenv("OVERNIGHT_PREMIUM_API_KEY", "secret-premium")
+        admin_headers = _admin_headers(monkeypatch)
+        client = _build_analysis_client(Path(temp_dir) / "test_daily_analysis_product_view.db")
+
+        generate_response = client.post(
+            "/api/v1/analysis/daily/generate",
+            params={"analysis_date": "2026-04-07"},
+            headers=admin_headers,
+        )
+        free_response = client.get("/api/v1/analysis/daily/product", params={"analysis_date": "2026-04-07", "tier": "free"})
+        premium_response = client.get(
+            "/api/v1/analysis/daily/product",
+            params={"analysis_date": "2026-04-07", "tier": "premium"},
+            headers={"X-Premium-Access-Key": "secret-premium"},
+        )
+
+        assert generate_response.status_code == 200
+        assert free_response.status_code == 200
+        free_payload = free_response.json()
+        assert free_payload["analysis_date"] == "2026-04-07"
+        assert free_payload["access_tier"] == "free"
+        assert free_payload["product_view"]["at_a_glance"]["window_label"]
+        assert free_payload["product_view"]["market_judgment"]["market_view"]
+        assert free_payload["product_view"]["sector_judgments"]
+        assert free_payload["product_view"]["evidence_chain"]
+        assert "risk_watchpoints" in free_payload["product_view"]["follow_up_panel"]
+        assert "providers" in free_payload["product_view"]["external_signal_panel"]
+
+        assert premium_response.status_code == 200
+        premium_payload = premium_response.json()
+        assert premium_payload["access_tier"] == "premium"
+        assert premium_payload["product_view"]["stock_judgments"]
+
+
 def test_generate_daily_analysis_excludes_stale_same_day_captures(monkeypatch) -> None:
     with tempfile.TemporaryDirectory() as temp_dir:
         admin_headers = _admin_headers(monkeypatch)
@@ -686,6 +1148,78 @@ def test_generate_daily_analysis_uses_market_date_news_window_when_snapshot_roll
     assert free_report["input_snapshot"]["item_count"] == 1
     assert free_report["supporting_items"][0]["item_id"] == prior_window_item_id
     assert free_report["market_snapshot"]["analysis_date"] == "2026-04-16"
+
+
+def test_generate_daily_analysis_includes_asia_followthrough_window_for_china_proxy() -> None:
+    with tempfile.TemporaryDirectory() as temp_dir:
+        database = Database(Path(temp_dir) / "test_daily_analysis_asia_followthrough.db")
+        repo = OvernightRepository(database)
+        asia_followthrough_item_id = _seed_item(
+            repo,
+            source_id="scmp_markets",
+            url="https://example.com/scmp/hk-stocks-jump",
+            title="Hong Kong stocks jump into 2026 with biggest surge since May",
+            summary="Hang Seng Tech and mainland Chinese stocks rose in Asia hours after the U.S. close.",
+            published_at="2026-04-25T01:30:00+08:00",
+            created_at="2026-04-25 01:35:00",
+        )
+        capture_service = OvernightSourceCaptureService(
+            repo=repo,
+            registry=build_default_source_registry(),
+        )
+        market_snapshot_service = StaticMarketSnapshotService(
+            {
+                "analysis_date": "2026-04-24",
+                "market_date": "2026-04-23",
+                "capture_summary": {
+                    "capture_status": "complete",
+                    "captured_instrument_count": 25,
+                    "missing_symbols": [],
+                    "core_missing_symbols": [],
+                },
+                "market_regimes": [
+                    {
+                        "regime_id": "2026-04-24__china_proxy_weakness",
+                        "regime_key": "china_proxy_weakness",
+                        "triggered": True,
+                        "direction": "bearish",
+                        "strength": 1.5,
+                        "confidence": "medium",
+                        "driving_symbols": ["KWEB", "FXI"],
+                        "supporting_observations": [],
+                        "suppressed_by": [],
+                    }
+                ],
+                "market_regime_evaluations": [],
+                "asset_board": {
+                    "analysis_date": "2026-04-24",
+                    "indexes": [],
+                    "sectors": [],
+                    "sentiment": [],
+                    "rates_fx": [],
+                    "precious_metals": [],
+                    "energy": [],
+                    "industrial_metals": [],
+                    "china_proxies": [
+                        {"symbol": "KWEB", "display_name": "中国互联网ETF", "change_pct": -2.1, "priority": 90},
+                        {"symbol": "FXI", "display_name": "中国大型股ETF", "change_pct": -0.8, "priority": 89},
+                    ],
+                    "china_mapped_futures": [],
+                },
+            }
+        )
+        from app.services.daily_analysis import DailyAnalysisService
+
+        service = DailyAnalysisService(
+            repo=repo,
+            capture_service=capture_service,
+            market_snapshot_service=market_snapshot_service,
+        )
+
+        result = service.generate_daily_reports(analysis_date="2026-04-24", recent_limit=50)
+
+    free_report = next(report for report in result["reports"] if report["access_tier"] == "free")
+    assert asia_followthrough_item_id in free_report["input_item_ids"]
 
 
 def test_generate_daily_analysis_includes_secondary_event_groups(monkeypatch) -> None:
@@ -1632,3 +2166,103 @@ def test_get_daily_analysis_returns_404_when_report_missing() -> None:
 
         assert response.status_code == 404
         assert response.json() == {"detail": "Daily analysis not found"}
+
+
+def test_get_daily_analysis_product_view_returns_404_when_report_missing() -> None:
+    with tempfile.TemporaryDirectory() as temp_dir:
+        client = TestClient(create_app(database=Database(Path(temp_dir) / "test_daily_analysis_product_empty.db")))
+
+        response = client.get("/api/v1/analysis/daily/product", params={"analysis_date": "2026-04-07", "tier": "free"})
+
+        assert response.status_code == 404
+        assert response.json() == {"detail": "Daily analysis not found"}
+
+
+def test_get_group_and_desk_report_routes_return_result_first_products(monkeypatch) -> None:
+    with tempfile.TemporaryDirectory() as temp_dir:
+        monkeypatch.setenv("OVERNIGHT_PREMIUM_API_KEY", "secret-premium")
+        admin_headers = _admin_headers(monkeypatch)
+        client = _build_analysis_client(Path(temp_dir) / "test_daily_analysis_result_first_routes.db")
+        client.post(
+            "/api/v1/analysis/daily/generate",
+            params={"analysis_date": "2026-04-07"},
+            headers=admin_headers,
+        )
+
+        group_response = client.get(
+            "/api/v1/analysis/daily/group-report",
+            params={"analysis_date": "2026-04-07", "tier": "free"},
+        )
+        denied_premium = client.get(
+            "/api/v1/analysis/daily/desk-report",
+            params={"analysis_date": "2026-04-07", "tier": "premium"},
+        )
+        desk_response = client.get(
+            "/api/v1/analysis/daily/desk-report",
+            params={"analysis_date": "2026-04-07", "tier": "premium"},
+            headers={"X-Premium-Access-Key": "secret-premium"},
+        )
+
+        assert group_response.status_code == 200
+        group_payload = group_response.json()
+        assert group_payload["report_type"] == "group_report"
+        assert group_payload["section_order"] == ["一句定盘", "结果数据层", "新闻/信息层", "昨晚市场没认的消息", "A股今天怎么打"]
+        assert group_payload["markdown"].startswith("# 群发中长版")
+        assert group_payload["a_share_playbook"]["segments"][0]["label"] == "A股大盘"
+        assert "continuation_check" not in group_payload
+
+        assert denied_premium.status_code == 403
+        assert denied_premium.json() == {"detail": "Premium access key required"}
+
+        assert desk_response.status_code == 200
+        desk_payload = desk_response.json()
+        assert desk_payload["report_type"] == "desk_report"
+        assert desk_payload["markdown"].startswith("# 内参长版")
+        assert "continuation_check" in desk_payload
+        assert desk_payload["continuation_check"]["items"]
+        assert [bucket["bucket_label"] for bucket in desk_payload["result_data"]["buckets"]] == [
+            "美股指数与板块",
+            "利率汇率",
+            "能源运输",
+            "贵金属",
+            "工业品",
+            "国内资产映射",
+            "概率市场",
+        ]
+
+
+def test_rule_based_daily_analysis_includes_polymarket_signal_in_market_view() -> None:
+    provider = RuleBasedDailyAnalysisProvider()
+
+    report = provider.generate_report(
+        analysis_date="2026-04-07",
+        access_tier="free",
+        items=[],
+        market_snapshot={
+            "headline": "标普500 +1.00%；纳指综指 +1.50%；VIX -6.00%。",
+            "asset_board": {
+                "indexes": [
+                    {"symbol": "^GSPC", "display_name": "标普500", "change_pct": 1.0},
+                    {"symbol": "^IXIC", "display_name": "纳指综指", "change_pct": 1.5},
+                ],
+                "energy": [],
+                "precious_metals": [],
+                "rates_fx": [],
+                "risk_signals": {"volatility_proxy": {"display_name": "VIX", "change_pct": -6.0}},
+            },
+            "prediction_markets": {
+                "status": "ready",
+                "signals": [
+                    {
+                        "signal_key": "fed_path",
+                        "label": "美联储路径",
+                        "probability": 64.0,
+                        "delta_pct_points": 5.0,
+                    }
+                ],
+            },
+        },
+        mainlines=[],
+    )
+
+    assert "Polymarket 显示 美联储路径 概率约 64.0%" in report["narratives"]["market_view"]

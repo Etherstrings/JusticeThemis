@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 from app.sources.types import SourceDefinition
+from app.sources.validation import MAINLAND_CHINA_OFFICIAL_DISABLE_REASON, source_references_mainland_china_official_domain
 
 _DEFAULT_SOURCES: tuple[SourceDefinition, ...] = (
     SourceDefinition(
@@ -175,8 +176,9 @@ _DEFAULT_SOURCES: tuple[SourceDefinition, ...] = (
         allowed_domains=("bls.gov",),
         search_discovery_enabled=True,
         search_queries=(
-            "site:bls.gov/news.release Employment Situation CPI PPI payrolls unemployment BLS",
-            "site:bls.gov/news.release import export prices productivity real earnings BLS",
+            "site:bls.gov/news.release filetype:htm CPI PPI Employment Situation payrolls unemployment BLS",
+            "site:bls.gov/news.release filetype:htm import export prices productivity real earnings BLS",
+            "site:bls.gov/news.release filetype:htm producer price index consumer price index BLS nr0",
         ),
     ),
     SourceDefinition(
@@ -307,6 +309,8 @@ _DEFAULT_SOURCES: tuple[SourceDefinition, ...] = (
         search_queries=(
             'site:iea.org/news IEA oil supply disruption strategic stocks',
             'site:iea.org/news IEA energy security minerals supply chain',
+            'site:iea.org/news IEA oil market gas market supply demand',
+            'site:iea.org/reports IEA oil market report energy security supply demand',
         ),
     ),
     SourceDefinition(
@@ -509,6 +513,63 @@ _DEFAULT_SOURCES: tuple[SourceDefinition, ...] = (
         region_focus="Global markets",
         coverage_focus="补充跨市场快讯和资产定价叙事，作为官方原文之外的第一层媒体确认。",
         allowed_domains=("reutersbest.com",),
+    ),
+    SourceDefinition(
+        source_id="scmp_markets",
+        display_name="SCMP Markets",
+        organization_type="editorial_media",
+        source_class="market",
+        entry_type="section_page",
+        entry_urls=(
+            "https://www.scmp.com/business/markets",
+            "https://www.scmp.com/business/china-business",
+        ),
+        priority=67,
+        poll_interval_seconds=1800,
+        is_mission_critical=False,
+        coverage_tier="editorial_media",
+        source_group="market_media",
+        source_tier="P2",
+        content_mode="market",
+        asset_tags=("china", "equities", "technology", "hong_kong"),
+        mainline_tags=("china_policy", "china_internet", "hong_kong_market", "macro_data"),
+        region_focus="Hong Kong and China markets",
+        coverage_focus="补港股、南向情绪、中国科技股和中概映射报道，服务 `国内资产映射` 桶的解释层。",
+        allowed_domains=("scmp.com",),
+        search_discovery_enabled=True,
+        search_queries=(
+            'site:scmp.com/business/markets Hong Kong stocks China tech ADR market overnight',
+            'site:scmp.com/business/china-business Hong Kong market China internet ADR selloff rally',
+            'site:scmp.com/business/markets KWEB FXI Hong Kong stocks China ADR',
+        ),
+    ),
+    SourceDefinition(
+        source_id="tradingeconomics_hk",
+        display_name="TradingEconomics Hong Kong",
+        organization_type="editorial_media",
+        source_class="market",
+        entry_type="section_page",
+        entry_urls=(
+            "https://tradingeconomics.com/hong-kong/stock-market",
+            "https://tradingeconomics.com/hong-kong/news",
+        ),
+        priority=66,
+        poll_interval_seconds=1800,
+        is_mission_critical=False,
+        coverage_tier="editorial_media",
+        source_group="market_media",
+        source_tier="P2",
+        content_mode="market",
+        asset_tags=("china", "equities", "hong_kong", "macro"),
+        mainline_tags=("hong_kong_market", "china_policy", "macro_data"),
+        region_focus="Hong Kong macro and market data",
+        coverage_focus="补香港股市、经济数据和风险偏好快讯，增强 `国内资产映射` 桶的市场侧硬源料。",
+        allowed_domains=("tradingeconomics.com",),
+        search_discovery_enabled=True,
+        search_queries=(
+            'site:tradingeconomics.com/hong-kong Hong Kong stock market news China ADR technology',
+            'site:tradingeconomics.com/hong-kong/news Hong Kong stocks China stimulus property technology',
+        ),
     ),
     SourceDefinition(
         source_id="ap_politics",
@@ -714,6 +775,57 @@ _DEFAULT_SOURCES: tuple[SourceDefinition, ...] = (
         allowed_domains=("farmdocdaily.illinois.edu",),
     ),
     SourceDefinition(
+        source_id="mining_com_markets",
+        display_name="MINING.COM Markets",
+        organization_type="editorial_media",
+        source_class="market",
+        entry_type="section_page",
+        entry_urls=("https://www.mining.com/",),
+        priority=76,
+        poll_interval_seconds=900,
+        is_mission_critical=False,
+        coverage_tier="editorial_media",
+        source_group="commodity_data",
+        source_tier="P2",
+        content_mode="industrial_metals",
+        asset_tags=("copper", "aluminum", "industrial_metals", "mining"),
+        mainline_tags=("industrials_chemicals", "shipping_logistics", "macro_data"),
+        region_focus="Global industrial metals and mining",
+        coverage_focus="补铜、铝、LME、冶炼、库存与矿山供给 headline，服务工业品结果桶解释层。",
+        allowed_domains=("mining.com",),
+        search_discovery_enabled=True,
+        search_queries=(
+            'site:mining.com/web copper aluminum market lme smelter inventory',
+            'site:mining.com/web copper price aluminum market mining.com',
+            'site:mining.com/web copper smelter treatment charges concentrate mining.com',
+            'site:mining.com/web aluminum smelter restart curtailment inventory mining.com',
+            'site:mining.com/web lme copper aluminum warehouse stocks mining.com',
+        ),
+    ),
+    SourceDefinition(
+        source_id="fastmarkets_markets",
+        display_name="Fastmarkets Market Insights",
+        organization_type="editorial_media",
+        source_class="market",
+        entry_type="section_page",
+        entry_urls=(
+            "https://www.fastmarkets.com/insights/category/market/",
+            "https://www.fastmarkets.com/insights/category/middle-east-conflict-2026/",
+        ),
+        priority=75,
+        poll_interval_seconds=900,
+        is_mission_critical=False,
+        coverage_tier="editorial_media",
+        source_group="commodity_data",
+        source_tier="P2",
+        content_mode="industrial_metals",
+        asset_tags=("aluminum", "steel", "industrial_metals", "mining"),
+        mainline_tags=("industrials_chemicals", "shipping_logistics", "macro_data"),
+        region_focus="Global industrial metals and raw materials",
+        coverage_focus="补铝、钢材、原料和中东成本扰动 headline，增强工业品结果桶解释层。",
+        allowed_domains=("fastmarkets.com",),
+    ),
+    SourceDefinition(
         source_id="cnbc_world",
         display_name="CNBC World",
         organization_type="editorial_media",
@@ -777,7 +889,20 @@ _DEFAULT_SOURCES: tuple[SourceDefinition, ...] = (
 
 
 def build_default_source_registry(source_class: str | None = None, *, include_disabled: bool = False) -> list[SourceDefinition]:
-    registry = list(_DEFAULT_SOURCES if include_disabled else [source for source in _DEFAULT_SOURCES if source.is_enabled])
+    normalized_sources = [_apply_registry_safety_guards(source) for source in _DEFAULT_SOURCES]
+    registry = list(normalized_sources if include_disabled else [source for source in normalized_sources if source.is_enabled])
     if source_class is None:
         return registry
     return [source for source in registry if source.source_class == source_class]
+
+
+def _apply_registry_safety_guards(source: SourceDefinition) -> SourceDefinition:
+    if not source_references_mainland_china_official_domain(source):
+        return source
+    return SourceDefinition(
+        **{
+            **source.__dict__,
+            "is_enabled": False,
+            "disable_reason": source.disable_reason or MAINLAND_CHINA_OFFICIAL_DISABLE_REASON,
+        }
+    )

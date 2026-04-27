@@ -5,7 +5,9 @@ from __future__ import annotations
 
 from app.services.pipeline_blueprint import PipelineBlueprintService
 from app.services.pipeline_markdown import render_pipeline_blueprint_markdown
-from app.sources.registry import build_default_source_registry
+from app.sources.registry import _apply_registry_safety_guards, build_default_source_registry
+from app.sources.types import SourceDefinition
+from app.sources.validation import MAINLAND_CHINA_OFFICIAL_DISABLE_REASON
 
 
 def test_pipeline_blueprint_service_describes_default_flow_and_source_policy() -> None:
@@ -53,3 +55,25 @@ def test_render_pipeline_blueprint_markdown_includes_entrypoints_and_lanes() -> 
     assert "official_policy" in markdown
     assert "/api/v1/pipeline/blueprint" in markdown
     assert "state_spokesperson_releases" in markdown
+
+
+def test_pipeline_blueprint_exposes_mainland_china_official_disable_reason() -> None:
+    guarded_source = _apply_registry_safety_guards(
+        SourceDefinition(
+            source_id="unsafe_stats_cn",
+            display_name="Unsafe Mainland Statistics Source",
+            organization_type="official_data",
+            source_class="macro",
+            entry_type="section_page",
+            entry_urls=("https://www.stats.gov.cn/sj/",),
+            priority=10,
+            poll_interval_seconds=3600,
+            allowed_domains=("stats.gov.cn",),
+        )
+    )
+    service = PipelineBlueprintService(registry=[guarded_source])
+
+    blueprint = service.build(max_sources=4, limit_per_source=2, recent_limit=10)
+
+    disabled = next(item for item in blueprint["disabled_sources"] if item["source_id"] == "unsafe_stats_cn")
+    assert disabled["disable_reason"] == MAINLAND_CHINA_OFFICIAL_DISABLE_REASON

@@ -4,8 +4,9 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from email.utils import parsedate_to_datetime
+import json
 import re
 from urllib.parse import urlsplit, urlunsplit
 import logging
@@ -57,6 +58,14 @@ _SOURCE_REQUIRED_PATH_PATTERNS: dict[str, tuple[re.Pattern[str], ...]] = {
     ),
     "ofac_recent_actions": (
         re.compile(r"^/recent-actions/.+", re.IGNORECASE),
+    ),
+    "bls_news_releases": (
+        re.compile(r"^/news\.release/[a-z0-9_-]+\.nr0\.htm$", re.IGNORECASE),
+    ),
+    "iea_news": (
+        re.compile(r"^/news/.+", re.IGNORECASE),
+        re.compile(r"^/commentaries/.+", re.IGNORECASE),
+        re.compile(r"^/reports/.+", re.IGNORECASE),
     ),
 }
 _SEARCH_NOISE_PATTERNS = (
@@ -324,6 +333,70 @@ class BraveSearchProvider(SearchDiscoveryProvider):
         ]
 
 
+class AIHubMixSearchProvider(SearchDiscoveryProvider):
+    name = "AIHubMix"
+    env_names = ("AIHUBMIX_API_KEYS", "AIHUBMIX_API_KEY")
+    _default_base_url = "https://aihubmix.com/v1"
+    _default_model = "gpt-4o-mini:surfing"
+
+    def __init__(self, *, api_keys: tuple[str, ...]) -> None:
+        super().__init__(api_keys=api_keys)
+        base_url = str(os.environ.get("AIHUBMIX_BASE_URL", "")).strip().rstrip("/")
+        self._endpoint = f"{base_url or self._default_base_url}/chat/completions"
+        self._model = str(os.environ.get("AIHUBMIX_SEARCH_MODEL", "")).strip() or self._default_model
+
+    def _search_once(self, *, query: str, api_key: str, max_results: int, days: int) -> list[SearchDiscoveryResult]:
+        today = datetime.now(timezone.utc).date()
+        earliest = today - timedelta(days=max(1, days))
+        response = requests.post(
+            self._endpoint,
+            headers={
+                "Authorization": f"Bearer {api_key}",
+                "Content-Type": "application/json",
+            },
+            json={
+                "model": self._model,
+                "messages": [
+                    {
+                        "role": "system",
+                        "content": (
+                            "You are a web search extraction engine. Search the web and return compact JSON only. "
+                            "Schema: {\"results\":[{\"title\":\"...\",\"url\":\"https://...\",\"snippet\":\"...\",\"published_at\":\"...\"}]}. "
+                            "Keep article-level pages only. Preserve original URLs. "
+                            "Do not return mainland Chinese government, regulator, tax, customs, central-bank, statistics, or ministry websites, including gov.cn, pbc.gov.cn, stats.gov.cn, mofcom.gov.cn, ndrc.gov.cn, csrc.gov.cn, safe.gov.cn, customs.gov.cn, and chinatax.gov.cn. "
+                            "Prefer pages inside the requested date window and always include published_at when you can infer it."
+                        ),
+                    },
+                    {
+                        "role": "user",
+                        "content": (
+                            f"Search query: {query}\n"
+                            f"Today: {today.isoformat()}\n"
+                            f"Only include results published on or after {earliest.isoformat()} when possible.\n"
+                            f"Return at most {min(max_results, 8)} results."
+                        ),
+                    },
+                ],
+                "temperature": 0,
+            },
+            timeout=_DEFAULT_TIMEOUT_SECONDS,
+        )
+        response.raise_for_status()
+        payload = response.json()
+        message = dict(payload.get("choices", [{}])[0].get("message", {}) or {})
+        content = _message_content_text(message.get("content"))
+
+        annotated_results = _parse_aihubmix_annotations(message=message, content=content, max_results=max_results)
+        if annotated_results:
+            return annotated_results[:max_results]
+
+        json_results = _parse_aihubmix_json_content(content, max_results=max_results)
+        if json_results:
+            return json_results[:max_results]
+
+        return _parse_aihubmix_markdown_links(content, max_results=max_results)
+
+
 class SearchDiscoveryService:
     """Normalize search-provider results into source candidates."""
 
@@ -338,6 +411,7 @@ class SearchDiscoveryService:
             BochaSearchProvider,
             TavilySearchProvider,
             BraveSearchProvider,
+            AIHubMixSearchProvider,
         ):
             api_keys = _parse_env_keys(provider_type.env_names)
             if api_keys:
@@ -540,6 +614,158 @@ def _safe_request_error(exc: requests.RequestException) -> str:
     if status_code is not None:
         return f"http_{status_code}"
     return exc.__class__.__name__
+
+
+def _message_content_text(content: object) -> str:
+    if isinstance(content, str):
+        return content.strip()
+    if not isinstance(content, list):
+        return ""
+    chunks: list[str] = []
+    for item in content:
+        if isinstance(item, str):
+            if item.strip():
+                chunks.append(item.strip())
+            continue
+        if not isinstance(item, dict):
+            continue
+        text = str(item.get("text", "")).strip()
+        if not text and isinstance(item.get("text"), dict):
+            text = str(dict(item.get("text", {})).get("value", "")).strip()
+        if text:
+            chunks.append(text)
+    return "\n".join(chunks).strip()
+
+
+def _parse_aihubmix_annotations(
+    *,
+    message: dict[str, object],
+    content: str,
+    max_results: int,
+) -> list[SearchDiscoveryResult]:
+    annotations = list(message.get("annotations", []) or [])
+    if not annotations and isinstance(message.get("content"), list):
+        for item in list(message.get("content", []) or []):
+            if not isinstance(item, dict):
+                continue
+            annotations.extend(list(item.get("annotations", []) or []))
+    if not annotations:
+        return []
+
+    snippet = _truncate_snippet(content, 280)
+    results: list[SearchDiscoveryResult] = []
+    seen_urls: set[str] = set()
+    for annotation in annotations:
+        if not isinstance(annotation, dict):
+            continue
+        url = str(annotation.get("url", "")).strip()
+        title = str(annotation.get("title", "")).strip() or url
+        if not url or url in seen_urls:
+            continue
+        seen_urls.add(url)
+        results.append(
+            SearchDiscoveryResult(
+                title=title,
+                snippet=snippet,
+                url=url,
+                published_at=None,
+            )
+        )
+        if len(results) >= max_results:
+            break
+    return results
+
+
+def _parse_aihubmix_json_content(content: str, *, max_results: int) -> list[SearchDiscoveryResult]:
+    cleaned = _strip_json_code_fence(content)
+    payload = _extract_json_payload(cleaned)
+    if payload is None:
+        return []
+    raw_results = payload.get("results", [])
+    if not isinstance(raw_results, list):
+        return []
+
+    results: list[SearchDiscoveryResult] = []
+    seen_urls: set[str] = set()
+    for item in raw_results:
+        if not isinstance(item, dict):
+            continue
+        url = str(item.get("url", "")).strip()
+        if not url or url in seen_urls:
+            continue
+        seen_urls.add(url)
+        results.append(
+            SearchDiscoveryResult(
+                title=str(item.get("title", "")).strip() or url,
+                snippet=_truncate_snippet(str(item.get("snippet", "")).strip(), 280),
+                url=url,
+                published_at=str(item.get("published_at", "")).strip() or None,
+            )
+        )
+        if len(results) >= max_results:
+            break
+    return results
+
+
+def _parse_aihubmix_markdown_links(content: str, *, max_results: int) -> list[SearchDiscoveryResult]:
+    if not content:
+        return []
+    results: list[SearchDiscoveryResult] = []
+    seen_urls: set[str] = set()
+    for line in content.splitlines():
+        stripped = line.strip()
+        if not stripped:
+            continue
+        for title, url in re.findall(r"\[([^\]]+)\]\((https?://[^)]+)\)", stripped):
+            normalized_url = str(url).strip()
+            if not normalized_url or normalized_url in seen_urls:
+                continue
+            seen_urls.add(normalized_url)
+            snippet = re.sub(r"\[[^\]]+\]\((https?://[^)]+)\)", r"\1", stripped)
+            results.append(
+                SearchDiscoveryResult(
+                    title=str(title).strip() or normalized_url,
+                    snippet=_truncate_snippet(snippet, 280),
+                    url=normalized_url,
+                    published_at=None,
+                )
+            )
+            if len(results) >= max_results:
+                return results
+    return results
+
+
+def _strip_json_code_fence(content: str) -> str:
+    stripped = str(content or "").strip()
+    if stripped.startswith("```"):
+        stripped = re.sub(r"^```(?:json)?\s*", "", stripped)
+        stripped = re.sub(r"\s*```$", "", stripped)
+    return stripped.strip()
+
+
+def _extract_json_payload(content: str) -> dict[str, object] | None:
+    if not content:
+        return None
+    candidates = [content]
+    start = content.find("{")
+    end = content.rfind("}")
+    if start >= 0 and end > start:
+        candidates.append(content[start : end + 1])
+    for candidate in candidates:
+        try:
+            parsed = json.loads(candidate)
+        except json.JSONDecodeError:
+            continue
+        if isinstance(parsed, dict):
+            return parsed
+    return None
+
+
+def _truncate_snippet(value: str, limit: int) -> str:
+    stripped = str(value or "").strip()
+    if len(stripped) <= limit:
+        return stripped
+    return stripped[: max(0, limit - 1)].rstrip() + "…"
 
 
 def _select_tavily_snippet(item: dict[str, object]) -> str:

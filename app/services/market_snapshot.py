@@ -22,7 +22,11 @@ import requests
 
 from app.repository import OvernightRepository
 from app.services.asset_board import AssetBoardService
+from app.services.coinbase_market_data import CoinbaseCandlesClient
+from app.services.cftc_cot import CFTCCOTSignalService
+from app.services.cme_fedwatch import CMEFedWatchSignalService
 from app.services.market_data_router import (
+    COINBASE_PROVIDER_NAME,
     IFIND_PROVIDER_NAME,
     STOOQ_PROVIDER_NAME,
     TREASURY_PROVIDER_NAME,
@@ -32,7 +36,9 @@ from app.services.market_data_router import (
     provider_symbol_for,
 )
 from app.services.ifind_market_data import IFindHistoryClient
+from app.services.kalshi_signals import KalshiSignalService
 from app.services.market_regime_engine import MarketRegimeEngine
+from app.services.polymarket_signals import PolymarketSignalService
 from app.services.treasury_yield_data import TreasuryYieldClient
 
 
@@ -41,6 +47,7 @@ logger = logging.getLogger(__name__)
 _IFIND_PROVIDER_NAME = IFIND_PROVIDER_NAME
 _TREASURY_PROVIDER_NAME = TREASURY_PROVIDER_NAME
 _STOOQ_PROVIDER_NAME = STOOQ_PROVIDER_NAME
+_COINBASE_PROVIDER_NAME = COINBASE_PROVIDER_NAME
 
 
 class FetchingClient(Protocol):
@@ -83,6 +90,7 @@ class MarketRequestsHttpClient:
         curl_fetcher: Callable[[str, dict[str, str], float], str] | None = None,
         ifind_client: IFindHistoryClient | None = None,
         treasury_client: TreasuryYieldClient | None = None,
+        coinbase_client: CoinbaseCandlesClient | None = None,
     ) -> None:
         self.session = session or requests.Session()
         self.retry_attempts = max(1, int(retry_attempts))
@@ -92,6 +100,7 @@ class MarketRequestsHttpClient:
         self._curl_fetcher = curl_fetcher or self._fetch_with_curl
         self.ifind_client = ifind_client or IFindHistoryClient.from_environment()
         self.treasury_client = treasury_client or TreasuryYieldClient()
+        self.coinbase_client = coinbase_client or CoinbaseCandlesClient()
 
     def fetch(self, url: str) -> str:
         if url.startswith("ifind://history/"):
@@ -108,6 +117,13 @@ class MarketRequestsHttpClient:
             if not provider_symbol:
                 raise RuntimeError("Treasury yield provider symbol is missing")
             return self.treasury_client.fetch_chart(provider_symbol)
+        if url.startswith("coinbase://candles/"):
+            if self.coinbase_client is None:
+                raise RuntimeError("Coinbase candle client is required for crypto provider")
+            provider_symbol = unquote(url.rsplit("/", 1)[-1].strip())
+            if not provider_symbol:
+                raise RuntimeError("Coinbase provider symbol is missing")
+            return self.coinbase_client.fetch_chart(provider_symbol)
 
         headers = {
             "User-Agent": self.USER_AGENT,
@@ -154,24 +170,26 @@ class MarketRequestsHttpClient:
         raise RuntimeError("Failed to fetch market snapshot payload")
 
     def _try_urllib_fallback(self, *, url: str, headers: dict[str, str], timeout: float) -> str | None:
-        if not _is_yahoo_chart_url(url):
+        if not (_is_yahoo_chart_url(url) or _is_stooq_csv_url(url)):
             return None
         try:
             return self._urllib_fetcher(url, headers, timeout)
         except Exception as exc:  # pragma: no cover - defensive logging path
-            logger.warning("Yahoo fallback fetch failed for %s: %s", url, exc)
+            logger.warning("Fallback fetch failed for %s: %s", url, exc)
             return None
 
     def _try_curl_fallback(self, *, url: str, headers: dict[str, str], timeout: float) -> str | None:
-        if not _is_yahoo_chart_url(url):
+        if not (_is_yahoo_chart_url(url) or _is_stooq_csv_url(url)):
             return None
         try:
             payload = self._curl_fetcher(url, headers, timeout)
-            if not _looks_like_json_payload(payload):
+            if _is_yahoo_chart_url(url) and not _looks_like_json_payload(payload):
+                return None
+            if _is_stooq_csv_url(url) and "," not in payload:
                 return None
             return payload
         except Exception as exc:  # pragma: no cover - defensive logging path
-            logger.warning("Yahoo curl fallback failed for %s: %s", url, exc)
+            logger.warning("Curl fallback failed for %s: %s", url, exc)
             return None
 
     @staticmethod
@@ -233,11 +251,26 @@ _IFIND_PROVIDER_SYMBOL_OVERRIDES: dict[str, str] = {
     "NG=F": "UNG.P",
     "HG=F": "CPER.P",
     "ALI=F": "DBB.P",
+    "BDRY": "BDRY.P",
+    "SEA": "SEA.P",
+    "BOAT": "BOAT.P",
+    "EEM": "EEM.P",
+    "EFA": "EFA.P",
+    "FEZ": "FEZ.P",
+    "EWJ": "EWJ.P",
+    "HYG": "HYG.P",
+    "LQD": "LQD.P",
+    "JNK": "JNK.P",
+    "EMB": "EMB.P",
+    "TLT": "TLT.O",
     "KWEB": "KWEB.P",
     "FXI": "FXI.P",
 }
 _TREASURY_PROVIDER_SYMBOL_OVERRIDES: dict[str, str] = {
+    "^UST2Y": "^UST2Y",
+    "^UST5Y": "^UST5Y",
     "^TNX": "^TNX",
+    "^UST30Y": "^UST30Y",
 }
 _STOOQ_PROVIDER_SYMBOL_OVERRIDES: dict[str, str] = {
     "^GSPC": "^spx",
@@ -262,8 +295,24 @@ _STOOQ_PROVIDER_SYMBOL_OVERRIDES: dict[str, str] = {
     "NG=F": "ng.f",
     "HG=F": "hg.f",
     "ALI=F": "ah.f",
+    "BDRY": "bdry.us",
+    "SEA": "sea.us",
+    "BOAT": "boat.us",
+    "EEM": "eem.us",
+    "EFA": "efa.us",
+    "FEZ": "fez.us",
+    "EWJ": "ewj.us",
+    "HYG": "hyg.us",
+    "LQD": "lqd.us",
+    "JNK": "jnk.us",
+    "EMB": "emb.us",
+    "TLT": "tlt.us",
     "KWEB": "kweb.us",
     "FXI": "fxi.us",
+}
+_COINBASE_PROVIDER_SYMBOL_OVERRIDES: dict[str, str] = {
+    "BTC-USD": "BTC-USD",
+    "ETH-USD": "ETH-USD",
 }
 
 
@@ -272,12 +321,15 @@ def _instrument(symbol: str, display_name: str, bucket: str, priority: int) -> M
     ifind_symbol = _IFIND_PROVIDER_SYMBOL_OVERRIDES.get(symbol)
     treasury_symbol = _TREASURY_PROVIDER_SYMBOL_OVERRIDES.get(symbol)
     stooq_symbol = _STOOQ_PROVIDER_SYMBOL_OVERRIDES.get(symbol)
+    coinbase_symbol = _COINBASE_PROVIDER_SYMBOL_OVERRIDES.get(symbol)
     if ifind_symbol:
         overrides.append((_IFIND_PROVIDER_NAME, ifind_symbol))
     if treasury_symbol:
         overrides.append((_TREASURY_PROVIDER_NAME, treasury_symbol))
     if stooq_symbol:
         overrides.append((_STOOQ_PROVIDER_NAME, stooq_symbol))
+    if coinbase_symbol:
+        overrides.append((_COINBASE_PROVIDER_NAME, coinbase_symbol))
     return MarketInstrumentDefinition(
         symbol=symbol,
         display_name=display_name,
@@ -301,11 +353,19 @@ DEFAULT_US_MARKET_INSTRUMENTS: tuple[MarketInstrumentDefinition, ...] = (
     _instrument("XLV", "医疗板块", "sector", 80),
     _instrument("XLY", "可选消费板块", "sector", 79),
     _instrument("XLP", "必选消费板块", "sector", 78),
-    _instrument("^TNX", "美国10年期国债收益率", "rates_fx", 76),
-    _instrument("DX-Y.NYB", "美元指数", "rates_fx", 75),
-    _instrument("CNH=X", "美元/离岸人民币", "rates_fx", 74),
+    _instrument("^UST2Y", "美国2年期国债收益率", "rates_fx", 77),
+    _instrument("^UST5Y", "美国5年期国债收益率", "rates_fx", 76),
+    _instrument("^TNX", "美国10年期国债收益率", "rates_fx", 75),
+    _instrument("^UST30Y", "美国30年期国债收益率", "rates_fx", 74),
+    _instrument("DX-Y.NYB", "美元指数", "rates_fx", 73),
+    _instrument("CNH=X", "美元/离岸人民币", "rates_fx", 72),
     _instrument("GC=F", "黄金", "precious_metals", 72),
     _instrument("SI=F", "白银", "precious_metals", 71),
+    _instrument("TLT", "长期美债ETF", "duration", 71),
+    _instrument("HYG", "高收益债ETF", "credit", 70),
+    _instrument("LQD", "投资级债ETF", "credit", 69),
+    _instrument("JNK", "垃圾债ETF", "credit", 68),
+    _instrument("EMB", "新兴市场债ETF", "credit", 67),
     _instrument("KWEB", "中国互联网ETF", "china_proxy", 70),
     _instrument("FXI", "中国大型股ETF", "china_proxy", 69),
     _instrument("CL=F", "WTI原油", "energy", 70),
@@ -313,6 +373,15 @@ DEFAULT_US_MARKET_INSTRUMENTS: tuple[MarketInstrumentDefinition, ...] = (
     _instrument("NG=F", "天然气", "energy", 67),
     _instrument("HG=F", "铜", "industrial_metals", 66),
     _instrument("ALI=F", "铝", "industrial_metals", 65),
+    _instrument("BDRY", "干散货ETF", "shipping", 64),
+    _instrument("SEA", "全球航运ETF", "shipping", 63),
+    _instrument("BOAT", "航运产业ETF", "shipping", 62),
+    _instrument("EEM", "新兴市场ETF", "global_equity", 61),
+    _instrument("EFA", "发达市场ETF", "global_equity", 60),
+    _instrument("FEZ", "欧元区ETF", "global_equity", 59),
+    _instrument("EWJ", "日本ETF", "global_equity", 58),
+    _instrument("BTC-USD", "比特币", "crypto", 57),
+    _instrument("ETH-USD", "以太坊", "crypto", 56),
 )
 
 _YAHOO_MARKET_DATA_PROVIDER = MarketDataProviderDefinition(
@@ -341,8 +410,15 @@ _STOOQ_MARKET_DATA_PROVIDER = MarketDataProviderDefinition(
     chart_url_template="https://stooq.com/q/l/?s={symbol}&f=sd2t2ohlcv&h&e=csv",
     quote_url_template="https://stooq.com/q/?s={symbol}",
 )
+_COINBASE_MARKET_DATA_PROVIDER = MarketDataProviderDefinition(
+    name=_COINBASE_PROVIDER_NAME,
+    source_url="https://exchange.coinbase.com/",
+    chart_url_template="coinbase://candles/{symbol}",
+    quote_url_template="https://exchange.coinbase.com/trade/{symbol}",
+)
 
 DEFAULT_MARKET_DATA_PROVIDERS: tuple[MarketDataProviderDefinition, ...] = (
+    _COINBASE_MARKET_DATA_PROVIDER,
     _TREASURY_MARKET_DATA_PROVIDER,
     _STOOQ_MARKET_DATA_PROVIDER,
     _YAHOO_MARKET_DATA_PROVIDER,
@@ -351,7 +427,13 @@ DEFAULT_MARKET_DATA_PROVIDERS: tuple[MarketDataProviderDefinition, ...] = (
 
 def _build_default_market_data_providers() -> tuple[MarketDataProviderDefinition, ...]:
     if os.environ.get("IFIND_REFRESH_TOKEN", "").strip():
-        return (_IFIND_MARKET_DATA_PROVIDER, _TREASURY_MARKET_DATA_PROVIDER, _STOOQ_MARKET_DATA_PROVIDER, _YAHOO_MARKET_DATA_PROVIDER)
+        return (
+            _IFIND_MARKET_DATA_PROVIDER,
+            _COINBASE_MARKET_DATA_PROVIDER,
+            _TREASURY_MARKET_DATA_PROVIDER,
+            _STOOQ_MARKET_DATA_PROVIDER,
+            _YAHOO_MARKET_DATA_PROVIDER,
+        )
     return DEFAULT_MARKET_DATA_PROVIDERS
 
 
@@ -368,6 +450,11 @@ def _is_yahoo_chart_url(url: str) -> bool:
     return "finance.yahoo.com/v8/finance/chart/" in lowered
 
 
+def _is_stooq_csv_url(url: str) -> bool:
+    lowered = str(url).strip().lower()
+    return "stooq.com/q/l/" in lowered
+
+
 class UsMarketSnapshotService:
     SESSION_NAME = "us_close"
     ANALYSIS_TIMEZONE = ZoneInfo("Asia/Shanghai")
@@ -381,6 +468,10 @@ class UsMarketSnapshotService:
         asset_board_service: AssetBoardService | None = None,
         providers: tuple[MarketDataProviderDefinition, ...] | None = None,
         regime_engine: MarketRegimeEngine | None = None,
+        prediction_market_service: PolymarketSignalService | None = None,
+        kalshi_signal_service: KalshiSignalService | None = None,
+        fedwatch_signal_service: CMEFedWatchSignalService | None = None,
+        cftc_signal_service: CFTCCOTSignalService | None = None,
     ) -> None:
         self.repo = repo
         self.http_client = http_client or MarketRequestsHttpClient()
@@ -389,6 +480,10 @@ class UsMarketSnapshotService:
         default_providers = _build_default_market_data_providers() if http_client is None else DEFAULT_MARKET_DATA_PROVIDERS
         self.providers = tuple(providers or default_providers)
         self.regime_engine = regime_engine or MarketRegimeEngine()
+        self.prediction_market_service = prediction_market_service or PolymarketSignalService.from_environment()
+        self.kalshi_signal_service = kalshi_signal_service or KalshiSignalService.from_environment()
+        self.fedwatch_signal_service = fedwatch_signal_service or CMEFedWatchSignalService.from_environment()
+        self.cftc_signal_service = cftc_signal_service or CFTCCOTSignalService.from_environment()
 
     def refresh_us_close_snapshot(self) -> dict[str, Any]:
         snapshots: list[dict[str, Any]] = []
@@ -413,6 +508,7 @@ class UsMarketSnapshotService:
 
         analysis_date = str(snapshots[0]["analysis_date"])
         market_date = str(snapshots[0]["market_date"])
+        previous_snapshot = self.repo.get_latest_market_snapshot(session_name=self.SESSION_NAME)
         provider_hits: dict[str, int] = {}
         for item in snapshots:
             provider_name = str(item.get("provider_name", "")).strip()
@@ -451,6 +547,11 @@ class UsMarketSnapshotService:
         precious_metals = [item for item in snapshots if item["bucket"] == "precious_metals"]
         energy = [item for item in snapshots if item["bucket"] == "energy"]
         industrial_metals = [item for item in snapshots if item["bucket"] == "industrial_metals"]
+        shipping = [item for item in snapshots if item["bucket"] == "shipping"]
+        global_equities = [item for item in snapshots if item["bucket"] == "global_equity"]
+        crypto = [item for item in snapshots if item["bucket"] == "crypto"]
+        credit = [item for item in snapshots if item["bucket"] == "credit"]
+        duration = [item for item in snapshots if item["bucket"] == "duration"]
         china_proxies = [item for item in snapshots if item["bucket"] == "china_proxy"]
         risk_signals = self._build_risk_signals(indexes=indexes, sectors=sectors, sentiment=sentiment)
         asset_board = self.asset_board_service.build(
@@ -463,6 +564,11 @@ class UsMarketSnapshotService:
             precious_metals=precious_metals,
             energy=energy,
             industrial_metals=industrial_metals,
+            shipping=shipping,
+            global_equities=global_equities,
+            crypto=crypto,
+            credit=credit,
+            duration=duration,
             china_proxies=china_proxies,
             risk_signals=risk_signals,
         )
@@ -474,6 +580,37 @@ class UsMarketSnapshotService:
             analysis_date=analysis_date,
             observations=observation_payloads,
         )
+        prediction_markets = self.prediction_market_service.collect(
+            analysis_date=analysis_date,
+            market_date=market_date,
+            previous_snapshot=previous_snapshot,
+        )
+        kalshi_signals = self.kalshi_signal_service.collect(
+            analysis_date=analysis_date,
+            market_date=market_date,
+            previous_snapshot=previous_snapshot,
+        )
+        fedwatch_signals = self.fedwatch_signal_service.collect(
+            analysis_date=analysis_date,
+            market_date=market_date,
+            previous_snapshot=previous_snapshot,
+        )
+        fedwatch_signals = self._fedwatch_or_prediction_fallback(
+            fedwatch_signals=fedwatch_signals,
+            prediction_markets=prediction_markets,
+            analysis_date=analysis_date,
+            market_date=market_date,
+        )
+        cftc_signals = self.cftc_signal_service.collect(
+            analysis_date=analysis_date,
+            market_date=market_date,
+            previous_snapshot=previous_snapshot,
+        )
+        external_signal_headlines = [
+            str(payload.get("headline", "")).strip()
+            for payload in (prediction_markets, kalshi_signals, fedwatch_signals, cftc_signals)
+            if isinstance(payload, dict) and str(payload.get("headline", "")).strip()
+        ]
 
         snapshot = {
             "analysis_date": analysis_date,
@@ -495,12 +632,36 @@ class UsMarketSnapshotService:
             "precious_metals": precious_metals,
             "energy": energy,
             "industrial_metals": industrial_metals,
+            "shipping": shipping,
+            "global_equities": global_equities,
+            "crypto": crypto,
+            "credit": credit,
+            "duration": duration,
             "china_proxies": china_proxies,
             "china_mapped_futures": asset_board["china_mapped_futures"],
             "asset_board": asset_board,
             "risk_signals": risk_signals,
             "market_regimes": list(regime_report.get("market_regimes", [])),
             "market_regime_evaluations": list(regime_report.get("market_regime_evaluations", [])),
+            "prediction_markets": prediction_markets,
+            "kalshi_signals": kalshi_signals,
+            "fedwatch_signals": fedwatch_signals,
+            "cftc_signals": cftc_signals,
+            "external_market_signals": {
+                "headline": "；".join(external_signal_headlines[:3]),
+                "provider_statuses": {
+                    "polymarket": str(dict(prediction_markets).get("status", "")).strip(),
+                    "kalshi": str(dict(kalshi_signals).get("status", "")).strip(),
+                    "cme_fedwatch": str(dict(fedwatch_signals).get("status", "")).strip(),
+                    "cftc": str(dict(cftc_signals).get("status", "")).strip(),
+                },
+                "provider_count": 4,
+                "ready_provider_count": sum(
+                    1
+                    for payload in (prediction_markets, kalshi_signals, fedwatch_signals, cftc_signals)
+                    if str(dict(payload).get("status", "")).strip() == "ready"
+                ),
+            },
         }
         return self.repo.upsert_market_snapshot(
             analysis_date=analysis_date,
@@ -559,7 +720,7 @@ class UsMarketSnapshotService:
             return "P2"
         if instrument.bucket in {"index", "sector", "sentiment", "rates_fx"}:
             return "P0"
-        if instrument.bucket in {"precious_metals", "energy", "industrial_metals", "china_proxy"}:
+        if instrument.bucket in {"precious_metals", "energy", "industrial_metals", "shipping", "global_equity", "crypto", "china_proxy", "credit", "duration"}:
             return "P1"
         return "P2"
 
@@ -568,6 +729,23 @@ class UsMarketSnapshotService:
         if candidate:
             return self.repo.get_market_snapshot(analysis_date=candidate, session_name=self.SESSION_NAME)
         return self.repo.get_latest_market_snapshot(session_name=self.SESSION_NAME)
+
+    def get_external_signals(self, *, analysis_date: str | None = None) -> dict[str, Any] | None:
+        snapshot = self.get_daily_snapshot(analysis_date=analysis_date)
+        if snapshot is None:
+            return None
+        return {
+            "analysis_date": snapshot.get("analysis_date"),
+            "market_date": snapshot.get("market_date"),
+            "session_name": snapshot.get("session_name"),
+            "source_name": snapshot.get("source_name"),
+            "source_url": snapshot.get("source_url"),
+            "external_market_signals": dict(snapshot.get("external_market_signals", {}) or {}),
+            "prediction_markets": dict(snapshot.get("prediction_markets", {}) or {}),
+            "kalshi_signals": dict(snapshot.get("kalshi_signals", {}) or {}),
+            "fedwatch_signals": dict(snapshot.get("fedwatch_signals", {}) or {}),
+            "cftc_signals": dict(snapshot.get("cftc_signals", {}) or {}),
+        }
 
     def _fetch_instrument_snapshot(self, instrument: MarketInstrumentDefinition) -> dict[str, Any]:
         last_error: Exception | None = None
@@ -782,6 +960,42 @@ class UsMarketSnapshotService:
             "volatility_proxy": vix,
         }
 
+    def _fedwatch_or_prediction_fallback(
+        self,
+        *,
+        fedwatch_signals: dict[str, Any],
+        prediction_markets: dict[str, Any],
+        analysis_date: str,
+        market_date: str,
+    ) -> dict[str, Any]:
+        if str(dict(fedwatch_signals or {}).get("status", "")).strip() == "ready":
+            return fedwatch_signals
+        prediction_payload = dict(prediction_markets or {})
+        signals = [
+            dict(signal or {})
+            for signal in list(prediction_payload.get("signals", []) or [])
+            if isinstance(signal, dict) and "fed" in str(signal.get("signal_key", "")).strip().lower()
+        ]
+        if not signals:
+            return fedwatch_signals
+        signal = signals[0]
+        label = str(signal.get("label", "")).strip() or "Fed利率预期"
+        probability = signal.get("probability")
+        probability_text = f"{float(probability):.1f}%" if probability is not None else "暂无概率"
+        return {
+            "provider_name": "FedWatch fallback",
+            "provider_url": str(signal.get("source_url", "")).strip() or str(prediction_payload.get("provider_url", "")).strip(),
+            "analysis_date": str(analysis_date or "").strip(),
+            "market_date": str(market_date or "").strip(),
+            "status": "ready",
+            "status_reason": "polymarket_fallback",
+            "headline": f"Polymarket利率预期：{label} {probability_text}",
+            "meetings": [],
+            "meeting_count": 0,
+            "fallback_signal": signal,
+            "fallback_provider": str(prediction_payload.get("provider_name", "")).strip() or "Polymarket",
+        }
+
 
 def _fetch_payload(http_client: object, url: str) -> str:
     fetch = getattr(http_client, "fetch", None)
@@ -822,7 +1036,7 @@ def _parse_stooq_previous_close(payload: str, *, provider_symbol: str) -> float 
 
 def _stooq_analysis_date(*, market_date: str, bucket: str) -> str:
     market_day = datetime.fromisoformat(f"{market_date}T00:00:00+00:00").date()
-    if bucket in {"index", "sector", "sentiment", "china_proxy"}:
+    if bucket in {"index", "sector", "sentiment", "china_proxy", "global_equity"}:
         return market_day.fromordinal(market_day.toordinal() + 1).isoformat()
     return market_day.isoformat()
 
@@ -836,6 +1050,11 @@ def _stooq_instrument_type(bucket: str) -> str:
         "precious_metals": "FUTURE",
         "energy": "FUTURE",
         "industrial_metals": "FUTURE",
+        "shipping": "ETF",
+        "global_equity": "ETF",
+        "crypto": "CRYPTOCURRENCY",
+        "credit": "ETF",
+        "duration": "ETF",
         "china_proxy": "ETF",
     }
     return mapping.get(str(bucket).strip(), "INDEX")

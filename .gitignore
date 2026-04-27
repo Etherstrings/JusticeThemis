@@ -1,4 +1,6 @@
 # Local environments and caches
+.env
+.env.local
 .venv/
 .pytest_cache/
 .mypy_cache/
@@ -10,6 +12,8 @@ __pycache__/
 *.egg-info/
 dist/
 build/
+frontend/node_modules/
+frontend/dist/
 
 # Local runtime data and exports
 data/
@@ -23,3 +27,6 @@ output/
 .coverage
 htmlcov/
 .DS_Store
+
+# TypeScript incremental build cache
+*.tsbuildinfo

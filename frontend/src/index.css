@@ -1,0 +1,56 @@
+@import "tailwindcss";
+
+:root {
+  /* The "Cold Intelligence" Palette */
+  --bg-primary: 0 0% 100%;       /* Pure White Paper */
+  --bg-secondary: 220 15% 98%;   /* Very Light Grey */
+  --text-primary: 222 47% 11%;   /* Ink Blue/Black */
+  --text-secondary: 215 16% 47%;  /* Slate Gray */
+
+  --border-subtle: 214 32% 91%;
+  --border-strong: 222 47% 11%;
+
+  /* Signal Colors - Muted and Precise */
+  --signal-red: 0 72% 51%;
+  --signal-green: 158 64% 40%;
+  --signal-blue: 221 83% 53%;
+
+  --radius-none: 0rem;
+}
+
+@theme {
+  --color-border: hsl(var(--border-subtle));
+  --color-border-strong: hsl(var(--border-strong));
+  --color-background: hsl(var(--bg-primary));
+  --color-background-alt: hsl(var(--bg-secondary));
+  --color-foreground: hsl(var(--text-primary));
+  --color-foreground-muted: hsl(var(--text-secondary));
+
+  --color-sig-red: hsl(var(--signal-red));
+  --color-sig-green: hsl(var(--signal-green));
+  --color-sig-blue: hsl(var(--signal-blue));
+}
+
+@layer base {
+  body {
+    @apply bg-background text-foreground antialiased;
+    font-family: 'Inter', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  }
+}
+
+/* Swiss Grid Utilities */
+.swiss-grid {
+  display: grid;
+  grid-template-columns: repeat(12, 1fr);
+  gap: 1px;
+  background-color: hsl(var(--border-subtle));
+}
+
+.swiss-cell {
+  background-color: hsl(var(--bg-primary));
+}
+
+.vertical-text {
+  writing-mode: vertical-rl;
+  text-orientation: mixed;
+}

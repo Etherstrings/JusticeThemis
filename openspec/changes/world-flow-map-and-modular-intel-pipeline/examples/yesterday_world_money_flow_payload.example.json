@@ -1,0 +1,177 @@
+{
+  "analysis_date": "2026-04-25",
+  "time_window": {
+    "label": "昨天世界钱往哪里",
+    "subtitle": "美东收盘后到中国早晨，这段时差里全球和钱相关的事情",
+    "start_at": "2026-04-24T16:00:00-04:00",
+    "end_at": "2026-04-25T08:30:00+08:00"
+  },
+  "global_headline": {
+    "title": "昨夜市场主线还是风险偏好回升，但背后不是单一利好，而是利率、地缘和 AI 硬件三条线一起推。",
+    "summary": "股市偏强、芯片继续领涨、短端美债和美元回落、原油受地缘支撑偏强，资金没有单边防守，而是在重新分配风险资产与避险资产。",
+    "confidence": "medium"
+  },
+  "headline_events": [
+    {
+      "title": "芯片股继续成为全球风险偏好的主要承接板块",
+      "summary": "英特尔大涨带动半导体继续冲高，AI 硬件链还是最强方向。",
+      "why_it_matters": "这是昨夜最直观的资金承接区。",
+      "importance_tier": "must_read",
+      "topic": "equity_and_sector_moves",
+      "direction": "risk_on",
+      "linked_assets": [
+        "INTC",
+        "SOX",
+        "NVDA"
+      ],
+      "source": "market + news"
+    },
+    {
+      "title": "地缘消息没有退场，但市场先交易边际缓和",
+      "summary": "中东谈判和航运消息继续扰动油价，不过股市没有继续走纯避险逻辑。",
+      "why_it_matters": "这解释了为什么昨夜会出现油强股也强的组合。",
+      "importance_tier": "must_read",
+      "topic": "geopolitics",
+      "direction": "mixed",
+      "linked_assets": [
+        "BRENT",
+        "GOLD",
+        "SPX"
+      ],
+      "source": "Reuters"
+    }
+  ],
+  "macro_policy": [
+    {
+      "title": "利率预期重新变得更松一点",
+      "summary": "市场对年内降息节奏的预期出现重新定价。",
+      "why_it_matters": "成长股估值和美元方向都会受影响。",
+      "importance_tier": "important",
+      "topic": "macro_policy",
+      "direction": "rates_down",
+      "linked_assets": [
+        "UST2Y",
+        "DXY"
+      ],
+      "source": "Fed commentary + rates futures"
+    }
+  ],
+  "geopolitics": [
+    {
+      "title": "中东谈判与航运风险继续左右油价",
+      "summary": "局势没有彻底缓和，但市场先交易最坏情况没有立刻发生。",
+      "why_it_matters": "这是昨夜原油偏强、黄金偏稳的背景。",
+      "importance_tier": "important",
+      "topic": "geopolitics",
+      "direction": "oil_up",
+      "linked_assets": [
+        "BRENT",
+        "WTI",
+        "GOLD"
+      ],
+      "source": "global newswire"
+    }
+  ],
+  "equity_and_sector_moves": [
+    {
+      "title": "美股继续偏强，半导体最能吸钱",
+      "summary": "科技大盘和芯片链延续强势，市场风格仍然偏向高景气成长。",
+      "why_it_matters": "说明资金没有离开风险资产，只是在往更强的地方集中。",
+      "importance_tier": "must_read",
+      "topic": "equity_and_sector_moves",
+      "direction": "equities_up",
+      "linked_assets": [
+        "SPX",
+        "NDX",
+        "SOX"
+      ],
+      "source": "market_snapshot"
+    }
+  ],
+  "rates_and_fx": [
+    {
+      "title": "短端美债和美元同步回落",
+      "summary": "风险偏好回升后，债和汇率端都给成长股松了一口气。",
+      "why_it_matters": "这和昨夜科技股上涨不是分开的两件事。",
+      "importance_tier": "important",
+      "topic": "rates_and_fx",
+      "direction": "usd_down",
+      "linked_assets": [
+        "UST2Y",
+        "DXY",
+        "EURUSD"
+      ],
+      "source": "market_snapshot"
+    }
+  ],
+  "commodities": [
+    {
+      "title": "油强、金稳、铜修复",
+      "summary": "商品没有给出单边避险信号，而是体现出地缘和风险偏好并存。",
+      "why_it_matters": "说明昨夜不是简单的 risk-on 或 risk-off。",
+      "importance_tier": "important",
+      "topic": "commodities",
+      "direction": "mixed",
+      "linked_assets": [
+        "BRENT",
+        "GOLD",
+        "COPPER"
+      ],
+      "source": "market_snapshot"
+    }
+  ],
+  "tech_ai_and_major_companies": [
+    {
+      "title": "AI 基建和芯片合作继续扩散到大厂层面",
+      "summary": "Meta 与亚马逊芯片合作这种消息，正在把 AI 基建叙事从单一 GPU 扩成整条基础设施链。",
+      "why_it_matters": "这会影响未来一段时间的算力链估值和资金偏好。",
+      "importance_tier": "important",
+      "topic": "tech_ai_and_major_companies",
+      "direction": "ai_infra_up",
+      "linked_assets": [
+        "META",
+        "AMZN",
+        "AI_INFRA"
+      ],
+      "source": "36Kr"
+    }
+  ],
+  "cross_asset_links": [
+    {
+      "title": "利率回落 + 芯片冲高 = 风险偏好回到 AI 硬件",
+      "summary": "债和汇的压力减一点，最先吃到增量资金的还是半导体和大科技。",
+      "linked_sections": [
+        "macro_policy",
+        "equity_and_sector_moves",
+        "rates_and_fx"
+      ]
+    },
+    {
+      "title": "油价偏强但股市也强，说明市场在交易边际缓和而非全面恐慌",
+      "summary": "这是昨夜最值得解释的一组组合信号。",
+      "linked_sections": [
+        "geopolitics",
+        "commodities",
+        "equity_and_sector_moves"
+      ]
+    }
+  ],
+  "source_index": [
+    {
+      "label": "华尔街见闻",
+      "count": 4
+    },
+    {
+      "label": "36氪",
+      "count": 3
+    },
+    {
+      "label": "Reuters",
+      "count": 2
+    },
+    {
+      "label": "market_snapshot",
+      "count": 5
+    }
+  ]
+}

@@ -197,6 +197,7 @@ class FrontendApiService:
             background_count = sum(1 for item in source_items if item.get("analysis_status") == "background")
             latest_item = self._latest_item(source_items)
             freshness_fields = self._source_freshness_fields(latest_item)
+            quality_fields = self._source_quality_fields(latest_item, refresh_state=refresh_state)
             source_rows.append(
                 {
                     "source_id": source.source_id,
@@ -236,8 +237,10 @@ class FrontendApiService:
                     "last_candidate_count": int(refresh_state.get("last_candidate_count", 0) or 0),
                     "last_selected_candidate_count": int(refresh_state.get("last_selected_candidate_count", 0) or 0),
                     "last_persisted_count": int(refresh_state.get("last_persisted_count", 0) or 0),
+                    "last_published_at_conflict_count": int(refresh_state.get("last_published_at_conflict_count", 0) or 0),
                     "last_elapsed_seconds": float(refresh_state.get("last_elapsed_seconds", 0.0) or 0.0),
                     **freshness_fields,
+                    **quality_fields,
                 }
             )
 
@@ -391,6 +394,28 @@ class FrontendApiService:
             "latest_is_timely": is_timely if isinstance(is_timely, bool) else None,
             "latest_publication_lag_minutes": publication_lag_minutes,
             "freshness_status": freshness_status,
+        }
+
+    def _source_quality_fields(self, latest_item: dict[str, Any] | None, *, refresh_state: dict[str, Any]) -> dict[str, Any]:
+        diagnostics = dict(dict(latest_item or {}).get("source_context", {}) or {}).get("published_at_diagnostics", {}) or {}
+        conflict_count = int(refresh_state.get("last_published_at_conflict_count", 0) or 0)
+        published_at_conflict = bool(diagnostics.get("published_at_conflict")) or conflict_count > 0
+        freshness_status = self._source_freshness_fields(latest_item).get("freshness_status")
+        quality_status = "clean"
+        quality_note = None
+        if published_at_conflict or conflict_count > 0:
+            quality_status = "conflicted"
+            quality_note = "search 时间与页面时间冲突，当前先按搜索时间入库。"
+        elif freshness_status == "stale":
+            quality_status = "stale"
+            quality_note = "最新样本不在当前窗口。"
+        elif freshness_status == "delayed":
+            quality_status = "delayed"
+            quality_note = "最新样本发布时间可靠，但抓取明显偏晚。"
+        return {
+            "latest_published_at_conflict": published_at_conflict,
+            "quality_status": quality_status,
+            "quality_note": quality_note,
         }
 
     def _sort_key(self, item: dict[str, Any]) -> tuple[int, int, int, float, int, float, int]:

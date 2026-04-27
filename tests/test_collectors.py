@@ -10,8 +10,9 @@ from app.collectors.attachment import AttachmentCollector
 from app.collectors.calendar import CalendarCollector
 from app.collectors.feed import FeedCollector
 from app.collectors.section import SectionCollector
-from app.sources.registry import build_default_source_registry
+from app.sources.registry import _apply_registry_safety_guards, build_default_source_registry
 from app.sources.types import SourceCandidate, SourceDefinition
+from app.sources.validation import MAINLAND_CHINA_OFFICIAL_DISABLE_REASON, is_source_url_allowed, validate_source_url
 
 
 FIXTURE_DIR = Path(__file__).parent / "fixtures" / "overnight"
@@ -207,6 +208,30 @@ def test_section_collector_extracts_reuters_topic_cards() -> None:
     ]
     assert [candidate.candidate_published_at for candidate in candidates] == ["2026-04-04", "2026-04-03"]
     assert [candidate.needs_article_fetch for candidate in candidates] == [True, True]
+
+
+def test_section_collector_extracts_mining_com_industrial_metals_cards() -> None:
+    collector = SectionCollector(http_client=FixtureClient(FIXTURE_DIR / "mining_com_markets.html"))
+    candidates = collector.collect(_source_by_id("mining_com_markets"))
+
+    assert len(candidates) == 2
+    assert [candidate.candidate_url for candidate in candidates] == [
+        "https://www.mining.com/web/copper-price-slides-as-china-demand-stays-soft/",
+        "https://www.mining.com/web/aluminum-market-tightens-as-smelter-cuts-deepen/",
+    ]
+    assert [candidate.candidate_published_at for candidate in candidates] == ["2026-04-24", "2026-04-24"]
+
+
+def test_section_collector_extracts_fastmarkets_industrial_metals_cards() -> None:
+    collector = SectionCollector(http_client=FixtureClient(FIXTURE_DIR / "fastmarkets_markets.html"))
+    candidates = collector.collect(_source_by_id("fastmarkets_markets"))
+
+    assert len(candidates) == 2
+    assert [candidate.candidate_url for candidate in candidates] == [
+        "https://www.fastmarkets.com/insights/whats-next-for-us-and-mexico-aluminium-key-insights-from-fastmarkets-market-outlook-webinar/",
+        "https://www.fastmarkets.com/insights/gcc-steel-supply-crunch-deepens-despite-ceasefire-talks/",
+    ]
+    assert [candidate.candidate_published_at for candidate in candidates] == ["2026-04-24", "2026-04-24"]
 
 
 def test_section_collector_caps_generic_candidate_volume_per_entry_url() -> None:
@@ -1886,6 +1911,54 @@ def test_article_collector_does_not_replace_full_section_datetime_with_time_only
     assert expanded.candidate_published_at_source == "section:time"
 
 
+def test_article_collector_keeps_newer_search_published_time_when_html_time_is_older() -> None:
+    html = """
+    <html>
+      <head>
+        <meta property="article:published_time" content="2026-01-12T15:30:00+08:00" />
+      </head>
+      <body>
+        <main>
+          <article>
+            <h1>Hong Kong Stocks Rally</h1>
+            <p>Hong Kong and mainland shares rallied on improving risk appetite.</p>
+          </article>
+        </main>
+      </body>
+    </html>
+    """
+    candidate = SourceCandidate(
+        candidate_type="search_result",
+        candidate_url="https://example.com/hong-kong-stocks-rally",
+        candidate_title="Hong Kong Stocks Rally",
+        candidate_summary="Hong Kong shares gained as sentiment improved.",
+        candidate_published_at="2026-04-19",
+        candidate_published_at_source="search:published",
+        needs_article_fetch=True,
+    )
+    collector = ArticleCollector(http_client=InlineFixtureClient(html))
+
+    expanded = collector.expand(candidate)
+
+    assert expanded.candidate_published_at == "2026-04-19"
+    assert expanded.candidate_published_at_source == "search:published"
+    assert dict(expanded.source_context or {}).get("published_at_diagnostics") == {
+        "search_published_at": "2026-04-19",
+        "search_published_at_source": "search:published",
+        "page_published_at": "2026-01-12T15:30:00+08:00",
+        "page_published_at_source": "html:meta_article_published_time",
+        "selected_published_at": "2026-04-19",
+        "selected_published_at_source": "search:published",
+        "published_at_conflict": True,
+    }
+
+
+def test_normalize_published_at_value_parses_month_day_year_dash_time() -> None:
+    from app.collectors.article import _normalize_published_at_value
+
+    assert _normalize_published_at_value("Apr 24, 2026 - 10:36 PM") == "2026-04-24T22:36:00"
+
+
 def test_default_source_registry_exposes_cross_market_metadata_and_strategic_sources() -> None:
     registry = build_default_source_registry()
     all_registry = build_default_source_registry(include_disabled=True)
@@ -1916,6 +1989,8 @@ def test_default_source_registry_exposes_cross_market_metadata_and_strategic_sou
     assert by_id["bis_news_updates"].allowed_domains == ("bis.gov",)
 
     assert by_id["bls_news_releases"].search_discovery_enabled is True
+    assert len(by_id["bls_news_releases"].search_queries) == 3
+    assert any("filetype:htm" in query and "nr0" in query for query in by_id["bls_news_releases"].search_queries)
     assert by_id["ofac_recent_actions"].search_discovery_enabled is True
     assert len(by_id["ofac_recent_actions"].search_queries) == 2
     assert by_id["ofac_recent_actions"].source_group == "official_policy"
@@ -1931,6 +2006,9 @@ def test_default_source_registry_exposes_cross_market_metadata_and_strategic_sou
     assert by_id["cftc_general_press_releases"].source_group == "commodity_data"
     assert by_id["cftc_enforcement_press_releases"].content_mode == "commodities"
     assert by_id["iea_news"].source_group == "commodity_data"
+    assert by_id["iea_news"].search_discovery_enabled is True
+    assert len(by_id["iea_news"].search_queries) == 4
+    assert any("site:iea.org/reports" in query for query in by_id["iea_news"].search_queries)
     assert by_id["worldbank_news"].source_group == "official_data"
     assert by_id["kitco_news"].source_group == "commodity_data"
     assert by_id["kitco_news"].content_mode == "precious_metals"
@@ -1938,6 +2016,14 @@ def test_default_source_registry_exposes_cross_market_metadata_and_strategic_sou
     assert by_id["oilprice_world_news"].content_mode == "energy"
     assert by_id["farmdoc_daily"].source_group == "commodity_data"
     assert by_id["farmdoc_daily"].content_mode == "agriculture"
+    assert by_id["scmp_markets"].source_group == "market_media"
+    assert by_id["scmp_markets"].content_mode == "market"
+    assert by_id["scmp_markets"].search_discovery_enabled is True
+    assert len(by_id["scmp_markets"].search_queries) == 3
+    assert by_id["tradingeconomics_hk"].source_group == "market_media"
+    assert by_id["tradingeconomics_hk"].content_mode == "market"
+    assert by_id["tradingeconomics_hk"].search_discovery_enabled is True
+    assert len(by_id["tradingeconomics_hk"].search_queries) == 2
     assert by_id["cnbc_markets"].source_group == "market_media"
     assert by_id["cnbc_markets"].content_mode == "market"
     assert by_id["cnbc_technology"].source_group == "market_media"
@@ -1963,3 +2049,90 @@ def test_default_source_registry_requires_cross_market_metadata_for_all_sources(
         assert source.content_mode, source.source_id
         assert source.asset_tags, source.source_id
         assert source.mainline_tags, source.source_id
+
+
+def test_default_source_registry_does_not_probe_mainland_china_official_domains() -> None:
+    blocked_tokens = (
+        "gov.cn",
+        "pbc.gov.cn",
+        "stats.gov.cn",
+        "mofcom.gov.cn",
+        "ndrc.gov.cn",
+        "csrc.gov.cn",
+        "safe.gov.cn",
+        "customs.gov.cn",
+        "chinatax.gov.cn",
+    )
+    registry = build_default_source_registry()
+
+    assert registry
+    for source in registry:
+        searchable_text = " ".join(
+            [
+                source.source_id,
+                source.display_name,
+                *source.entry_urls,
+                *source.allowed_domains,
+                *source.search_queries,
+            ]
+        ).lower()
+        for token in blocked_tokens:
+            assert token not in searchable_text, source.source_id
+
+
+def test_source_registry_safety_guard_disables_mainland_china_official_sources_without_blocking_readhub() -> None:
+    official_source = SourceDefinition(
+        source_id="unsafe_stats_cn",
+        display_name="Unsafe Mainland Statistics Source",
+        organization_type="official_data",
+        source_class="macro",
+        entry_type="section_page",
+        entry_urls=("https://www.stats.gov.cn/sj/",),
+        priority=10,
+        poll_interval_seconds=3600,
+        allowed_domains=("stats.gov.cn",),
+        search_discovery_enabled=True,
+        search_queries=("site:stats.gov.cn China macro data",),
+    )
+    readhub_source = next(source for source in build_default_source_registry() if source.source_id == "readhub_daily_digest")
+
+    guarded = _apply_registry_safety_guards(official_source)
+
+    assert guarded.is_enabled is False
+    assert guarded.disable_reason == MAINLAND_CHINA_OFFICIAL_DISABLE_REASON
+    assert _apply_registry_safety_guards(readhub_source).is_enabled is True
+
+
+def test_source_url_validation_rejects_mainland_china_official_domains_even_when_allowed() -> None:
+    source = SourceDefinition(
+        source_id="manual_stats_cn",
+        display_name="Manual Mainland Statistics Source",
+        organization_type="official_data",
+        source_class="macro",
+        entry_type="section_page",
+        entry_urls=("https://www.stats.gov.cn/sj/",),
+        priority=10,
+        poll_interval_seconds=3600,
+        allowed_domains=("stats.gov.cn",),
+    )
+
+    result = validate_source_url("https://www.stats.gov.cn/sj/zxfb/", source)
+
+    assert result["domain_status"] == "verified"
+    assert result["blocked_reason"] == MAINLAND_CHINA_OFFICIAL_DISABLE_REASON
+    assert result["url_valid"] is False
+    assert is_source_url_allowed("https://www.stats.gov.cn/sj/zxfb/", source) is False
+
+
+def test_china_related_search_queries_stay_site_scoped_to_allowed_domains() -> None:
+    china_markers = ("china", "hong kong", "kweb", "fxi", "adr", "adrs")
+    blocked_tokens = ("gov.cn", "pbc.gov.cn", "stats.gov.cn", "mofcom.gov.cn", "ndrc.gov.cn", "csrc.gov.cn", "safe.gov.cn")
+
+    for source in build_default_source_registry():
+        for query in source.search_queries:
+            normalized = query.lower()
+            if not any(marker in normalized for marker in china_markers):
+                continue
+            assert "site:" in normalized, source.source_id
+            assert any(f"site:{domain}" in normalized for domain in source.allowed_domains), source.source_id
+            assert all(token not in normalized for token in blocked_tokens), source.source_id

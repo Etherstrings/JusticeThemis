@@ -12,6 +12,7 @@ YAHOO_PROVIDER_NAME = "Yahoo Finance Chart"
 IFIND_PROVIDER_NAME = "iFinD History"
 TREASURY_PROVIDER_NAME = "Treasury Yield Curve"
 STOOQ_PROVIDER_NAME = "Stooq Quotes"
+COINBASE_PROVIDER_NAME = "Coinbase Candles"
 
 _DEFAULT_PROVIDER_PRIORITY: tuple[str, ...] = (
     IFIND_PROVIDER_NAME,
@@ -27,6 +28,11 @@ _BUCKET_PROVIDER_PRIORITY: dict[str, tuple[str, ...]] = {
     "precious_metals": (IFIND_PROVIDER_NAME, STOOQ_PROVIDER_NAME, YAHOO_PROVIDER_NAME),
     "energy": (IFIND_PROVIDER_NAME, STOOQ_PROVIDER_NAME, YAHOO_PROVIDER_NAME),
     "industrial_metals": (IFIND_PROVIDER_NAME, STOOQ_PROVIDER_NAME, YAHOO_PROVIDER_NAME),
+    "shipping": (IFIND_PROVIDER_NAME, STOOQ_PROVIDER_NAME, YAHOO_PROVIDER_NAME),
+    "global_equity": (IFIND_PROVIDER_NAME, STOOQ_PROVIDER_NAME, YAHOO_PROVIDER_NAME),
+    "crypto": (COINBASE_PROVIDER_NAME, YAHOO_PROVIDER_NAME),
+    "credit": (IFIND_PROVIDER_NAME, STOOQ_PROVIDER_NAME, YAHOO_PROVIDER_NAME),
+    "duration": (IFIND_PROVIDER_NAME, STOOQ_PROVIDER_NAME, YAHOO_PROVIDER_NAME),
     "china_proxy": (IFIND_PROVIDER_NAME, STOOQ_PROVIDER_NAME, YAHOO_PROVIDER_NAME),
 }
 
@@ -56,6 +62,7 @@ def provider_applies_to(instrument: Any, provider_name: str) -> bool:
         IFIND_PROVIDER_NAME.strip().lower(),
         TREASURY_PROVIDER_NAME.strip().lower(),
         STOOQ_PROVIDER_NAME.strip().lower(),
+        COINBASE_PROVIDER_NAME.strip().lower(),
     }:
         return True
     return any(

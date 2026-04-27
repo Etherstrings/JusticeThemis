@@ -62,10 +62,20 @@ class AssetBoardService:
         precious_metals: list[dict[str, Any]],
         energy: list[dict[str, Any]],
         industrial_metals: list[dict[str, Any]],
+        shipping: list[dict[str, Any]] | None = None,
+        global_equities: list[dict[str, Any]] | None = None,
+        crypto: list[dict[str, Any]] | None = None,
+        credit: list[dict[str, Any]] | None = None,
+        duration: list[dict[str, Any]] | None = None,
         china_proxies: list[dict[str, Any]] | None = None,
         risk_signals: dict[str, Any],
     ) -> dict[str, Any]:
         china_proxies = list(china_proxies or [])
+        shipping = list(shipping or [])
+        global_equities = list(global_equities or [])
+        crypto = list(crypto or [])
+        credit = list(credit or [])
+        duration = list(duration or [])
         tracked_groups = [
             indexes,
             sectors,
@@ -73,6 +83,11 @@ class AssetBoardService:
             precious_metals,
             energy,
             industrial_metals,
+            shipping,
+            global_equities,
+            crypto,
+            credit,
+            duration,
         ]
         tracked_items = [item for group in tracked_groups for item in group]
         symbol_map = {str(item.get("symbol")): item for item in tracked_items if str(item.get("symbol")).strip()}
@@ -88,6 +103,11 @@ class AssetBoardService:
             "precious_metals": precious_metals,
             "energy": energy,
             "industrial_metals": industrial_metals,
+            "shipping": shipping,
+            "global_equities": global_equities,
+            "crypto": crypto,
+            "credit": credit,
+            "duration": duration,
             "china_proxies": china_proxies,
             "china_mapped_futures": self._build_china_mapped_futures(symbol_map=symbol_map),
             "key_moves": {

@@ -5,7 +5,12 @@ from __future__ import annotations
 
 from app.pipeline import resolve_health_exit_code
 from app.services.pipeline_health import PipelineHealthService
-from app.services.pipeline_markdown import render_daily_report_markdown, render_pipeline_summary_markdown
+from app.services.pipeline_markdown import (
+    render_daily_report_markdown,
+    render_desk_report_markdown,
+    render_group_report_markdown,
+    render_pipeline_summary_markdown,
+)
 
 
 def _healthy_summary() -> dict[str, object]:
@@ -427,6 +432,21 @@ def test_render_daily_report_markdown_includes_detailed_market_moves_and_driver_
     assert "White House News" in markdown
     assert "ICE 布油盘中突破 96 美元/桶" in markdown
     assert "市场先交易布伦特原油 +1.60%" in markdown
+
+
+def test_render_group_and_desk_report_markdown_prefer_embedded_markdown() -> None:
+    report = {
+        "group_report": {"markdown": "# 群发中长版\n\n- 纳指暴涨（+4.20%）\n"},
+        "desk_report": {"markdown": "# 内参长版\n\n- 当前没货\n"},
+    }
+
+    group_markdown = render_group_report_markdown(report)
+    desk_markdown = render_desk_report_markdown(report)
+
+    assert group_markdown.startswith("# 群发中长版")
+    assert "纳指暴涨" in group_markdown
+    assert desk_markdown.startswith("# 内参长版")
+    assert "当前没货" in desk_markdown
 
 
 def test_resolve_health_exit_code_respects_warn_threshold() -> None:

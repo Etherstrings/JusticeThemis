@@ -1,206 +1,153 @@
-const refreshButton = document.getElementById("refreshButton");
-const refreshStatus = document.getElementById("refreshStatus");
-const adminAccessKeyInput = document.getElementById("adminAccessKeyInput");
+const ADMIN_STORAGE_KEY = "justice-themis.frontend.admin-key";
+const IFIND_STORAGE_KEY = "justice-themis.frontend.ifind-token";
+
+// DOM Elements
+const adminInput = document.getElementById("adminAccessKeyInput");
+const ifindInput = document.getElementById("ifindTokenInput");
+const refreshBtn = document.getElementById("refreshButton");
+const saveIfindBtn = document.getElementById("saveIfindButton");
+const statusTerminal = document.getElementById("refreshStatus");
+
 const metricItems = document.getElementById("metricItems");
 const metricOfficial = document.getElementById("metricOfficial");
 const metricEditorial = document.getElementById("metricEditorial");
+
 const itemsList = document.getElementById("itemsList");
 const handoffPrompt = document.getElementById("handoffPrompt");
-const handoffGroups = document.getElementById("handoffGroups");
 const handoffJson = document.getElementById("handoffJson");
-const ADMIN_ACCESS_KEY_STORAGE_KEY = "justice-themis.admin-access-key";
-const LEGACY_ADMIN_ACCESS_KEY_STORAGE_KEY = "overnight-news-handoff.admin-access-key";
 
-function escapeHtml(value) {
-  return String(value ?? "")
-    .replaceAll("&", "&amp;")
-    .replaceAll("<", "&lt;")
-    .replaceAll(">", "&gt;")
-    .replaceAll('"', "&quot;")
-    .replaceAll("'", "&#39;");
+// Initialize from local storage
+adminInput.value = localStorage.getItem(ADMIN_STORAGE_KEY) || "";
+ifindInput.value = localStorage.getItem(IFIND_STORAGE_KEY) || "";
+
+adminInput.addEventListener("input", (e) => {
+  localStorage.setItem(ADMIN_STORAGE_KEY, e.target.value.trim());
+});
+ifindInput.addEventListener("input", (e) => {
+  localStorage.setItem(IFIND_STORAGE_KEY, e.target.value.trim());
+});
+
+// Logging utility
+function logStatus(message, isError = false) {
+  const time = new Date().toLocaleTimeString('en-US', { hour12: false });
+  const color = isError ? "var(--accent-alert)" : "var(--accent-green)";
+  statusTerminal.innerHTML = `<span style="color:${color}">[${time}] ${message}</span><br/>` + statusTerminal.innerHTML;
 }
 
-function renderItems(items) {
-  if (!items.length) {
-    itemsList.innerHTML = '<div class="empty-state">No captured items yet. Trigger a refresh to pull official sources.</div>';
-    return;
+// Fetch headers
+function getHeaders() {
+  const headers = { "Content-Type": "application/json" };
+  const adminKey = localStorage.getItem(ADMIN_STORAGE_KEY);
+  if (adminKey) {
+    headers["X-Admin-Access-Key"] = adminKey;
   }
+  return headers;
+}
 
-  itemsList.innerHTML = items
-    .map((item) => {
-      const entityNames = (item.entities || []).map((entity) => entity.name).join(", ");
-      const numericFacts = (item.numeric_facts || [])
-        .map((fact) => `${fact.metric}: ${fact.value} ${fact.unit}${fact.subject ? ` (${fact.subject})` : ""}`)
-        .join(" | ");
-      const impactLines = [
-        item.impact_summary ? `影响概述: ${item.impact_summary}` : "",
-        (item.beneficiary_directions || []).length ? `受益方向: ${(item.beneficiary_directions || []).join("、")}` : "",
-        (item.pressured_directions || []).length ? `承压方向: ${(item.pressured_directions || []).join("、")}` : "",
-        (item.price_up_signals || []).length ? `可能涨价: ${(item.price_up_signals || []).join("、")}` : "",
-        (item.follow_up_checks || []).length ? `待确认: ${(item.follow_up_checks || []).join("；")}` : "",
-      ].filter(Boolean);
-      return `
-        <article class="item-card">
-          <div class="item-meta">
-            <span class="badge">${escapeHtml(item.source_name)}</span>
-            <span class="badge secondary">${escapeHtml(item.coverage_tier || item.organization_type || "source")}</span>
-            <span class="badge secondary">${escapeHtml(item.published_at || "time unknown")}</span>
-            ${item.published_at_source ? `<span class="badge secondary">${escapeHtml(item.published_at_source)}</span>` : ""}
-            ${item.summary_quality ? `<span class="badge secondary">${escapeHtml(item.summary_quality)} summary</span>` : ""}
-            ${item.a_share_relevance ? `<span class="badge secondary">${escapeHtml(item.a_share_relevance)} A-share</span>` : ""}
-            ${item.analysis_status ? `<span class="badge secondary">${escapeHtml(item.analysis_status)} analysis</span>` : ""}
-            ${item.excerpt_source ? `<span class="badge secondary">${escapeHtml(item.excerpt_source)}</span>` : ""}
-            ${item.excerpt_char_count ? `<span class="badge secondary">${escapeHtml(item.excerpt_char_count)} chars</span>` : ""}
-          </div>
-          <h3>${escapeHtml(item.title || "Untitled item")}</h3>
-          <p class="item-summary">${escapeHtml(item.summary || "No summary extracted yet.")}</p>
-          ${item.a_share_relevance_reason ? `<p class="item-summary">${escapeHtml(item.a_share_relevance_reason)}</p>` : ""}
-          ${item.analysis_blockers && item.analysis_blockers.length ? `<p class="item-summary impact-line">${escapeHtml(`分析阻塞: ${item.analysis_blockers.join("、")}`)}</p>` : ""}
-          ${impactLines.map((line) => `<p class="item-summary impact-line">${escapeHtml(line)}</p>`).join("")}
-          <div class="item-footer">
-            <a class="item-link" href="${escapeHtml(item.canonical_url)}" target="_blank" rel="noreferrer">Open source</a>
-            ${entityNames ? `<span class="badge secondary">Entities: ${escapeHtml(entityNames)}</span>` : ""}
-            ${numericFacts ? `<span class="badge secondary">Facts: ${escapeHtml(numericFacts)}</span>` : ""}
-          </div>
-        </article>
+// Format numbers
+function pad(num) {
+  return String(num).padStart(2, '0');
+}
+
+// API Calls
+async function fetchDashboard() {
+  try {
+    const res = await fetch("/api/v1/dashboard");
+    if (!res.ok) throw new Error("Failed to fetch dashboard");
+    const data = await res.json();
+
+    if (data.hero) {
+      metricItems.textContent = pad(data.hero.total_items || 0);
+      metricOfficial.textContent = pad(data.hero.official_count || 0);
+      metricEditorial.textContent = pad(data.hero.ready_count || 0);
+    }
+  } catch (err) {
+    logStatus("ERR: Dashboard sync failed", true);
+  }
+}
+
+async function fetchItems() {
+  try {
+    const res = await fetch("/items?limit=20");
+    if (!res.ok) throw new Error("Failed to fetch items");
+    const data = await res.json();
+
+    itemsList.innerHTML = "";
+    (data.items || []).forEach(item => {
+      const el = document.createElement("div");
+      el.className = "news-item";
+      el.innerHTML = `
+        <div class="news-meta">
+          <span>SRC: ${item.source_id || "UNKNOWN"}</span>
+          <span>TIER: ${item.coverage_tier || "N/A"}</span>
+        </div>
+        <div class="news-title">${item.title || "No Title"}</div>
+        <div class="news-summary">${item.summary ? item.summary.substring(0, 100) + '...' : ''}</div>
       `;
-    })
-    .join("");
-}
-
-function renderGroups(groups) {
-  if (!groups.length) {
-    handoffGroups.innerHTML = '<div class="empty-state">No handoff groups yet.</div>';
-    return;
-  }
-
-  handoffGroups.innerHTML = groups
-    .map(
-      (group) => `
-        <section class="group-card">
-          <h3>${escapeHtml(group.title || group.coverage_tier)}</h3>
-          <p class="group-summary">${escapeHtml(group.summary || "")}</p>
-          <div class="group-items">
-            ${(group.items || [])
-              .map(
-                (item) => `
-                  <span class="group-chip">
-                    #${escapeHtml(item.item_id)} ${escapeHtml(item.source_name)}: ${escapeHtml(item.title)}
-                  </span>
-                `
-              )
-              .join("")}
-          </div>
-        </section>
-      `
-    )
-    .join("");
-}
-
-function updateMetrics(itemsPayload, handoffPayload) {
-  metricItems.textContent = String(itemsPayload.total || 0);
-  metricOfficial.textContent = String(handoffPayload.official_item_count || 0);
-  metricEditorial.textContent = String(handoffPayload.editorial_item_count || 0);
-}
-
-async function fetchJson(url, options = undefined) {
-  const response = await fetch(url, options);
-  if (!response.ok) {
-    if (response.status === 403) {
-      throw new Error("403 Forbidden. Add the admin access key above or enable unsafe admin mode.");
-    }
-    throw new Error(`${response.status} ${response.statusText}`);
-  }
-  return response.json();
-}
-
-function readAdminAccessKey() {
-  return String(adminAccessKeyInput?.value ?? "").trim();
-}
-
-function buildAdminHeaders() {
-  const accessKey = readAdminAccessKey();
-  return accessKey ? { "X-Admin-Access-Key": accessKey } : {};
-}
-
-function persistAdminAccessKey() {
-  if (!adminAccessKeyInput) {
-    return;
-  }
-  const accessKey = readAdminAccessKey();
-  try {
-    if (accessKey) {
-      window.localStorage.setItem(ADMIN_ACCESS_KEY_STORAGE_KEY, accessKey);
-    } else {
-      window.localStorage.removeItem(ADMIN_ACCESS_KEY_STORAGE_KEY);
-    }
-  } catch (_error) {
-    // Ignore storage failures and keep the current in-memory value.
-  }
-}
-
-function hydrateAdminAccessKey() {
-  if (!adminAccessKeyInput) {
-    return;
-  }
-  try {
-    const storedValue =
-      window.localStorage.getItem(ADMIN_ACCESS_KEY_STORAGE_KEY) ||
-      window.localStorage.getItem(LEGACY_ADMIN_ACCESS_KEY_STORAGE_KEY);
-    if (storedValue) {
-      adminAccessKeyInput.value = storedValue;
-    }
-  } catch (_error) {
-    // Ignore storage failures and continue with a blank field.
-  }
-}
-
-async function loadDashboard() {
-  const [itemsPayload, handoffPayload] = await Promise.all([
-    fetchJson("/items?limit=12"),
-    fetchJson("/handoff?limit=12"),
-  ]);
-
-  renderItems(itemsPayload.items || []);
-  renderGroups(handoffPayload.groups || []);
-  updateMetrics(itemsPayload, handoffPayload);
-  handoffPrompt.textContent = handoffPayload.prompt_scaffold || "Prompt scaffold unavailable.";
-  handoffJson.textContent = JSON.stringify(handoffPayload, null, 2);
-  refreshStatus.textContent = `Loaded ${itemsPayload.total || 0} items at ${new Date().toLocaleString()}.`;
-}
-
-async function runRefresh() {
-  refreshButton.disabled = true;
-  refreshStatus.textContent = "Refreshing official and editorial source pages...";
-  try {
-    persistAdminAccessKey();
-    const payload = await fetchJson("/refresh?limit_per_source=2&max_sources=6&recent_limit=12", {
-      method: "POST",
-      headers: buildAdminHeaders(),
+      itemsList.appendChild(el);
     });
-    await loadDashboard();
-    refreshStatus.textContent = `Refresh complete. ${payload.collected_items || 0} items stored across ${payload.collected_sources || 0} sources.`;
-  } catch (error) {
-    refreshStatus.textContent = `Refresh failed: ${error.message}`;
-  } finally {
-    refreshButton.disabled = false;
+  } catch (err) {
+    logStatus("ERR: Items sync failed", true);
   }
 }
 
-refreshButton.addEventListener("click", () => {
-  void runRefresh();
+async function fetchHandoff() {
+  try {
+    const res = await fetch("/api/v1/analysis/daily/prompt");
+    if (res.ok) {
+      const data = await res.json();
+      handoffPrompt.textContent = data.compiled_prompt || "Prompt payload empty.";
+      handoffJson.textContent = JSON.stringify(data, null, 2);
+    } else {
+      handoffPrompt.textContent = "Awaiting generation or no data for today.";
+      handoffJson.textContent = "{}";
+    }
+  } catch (err) {
+    logStatus("ERR: Handoff sync failed", true);
+  }
+}
+
+// Actions
+refreshBtn.addEventListener("click", async () => {
+  logStatus("INITIATING SOURCE REFRESH...");
+  try {
+    const res = await fetch("/refresh", { method: "POST", headers: getHeaders() });
+    if (!res.ok) {
+      const text = await res.text();
+      throw new Error(text);
+    }
+    logStatus("REFRESH COMPLETE. SYNCING DATA.");
+    loadAllData();
+  } catch (err) {
+    logStatus(`REFRESH FAILED: ${err.message}`, true);
+  }
 });
 
-adminAccessKeyInput?.addEventListener("change", persistAdminAccessKey);
-adminAccessKeyInput?.addEventListener("blur", persistAdminAccessKey);
-
-window.loadDashboard = loadDashboard;
-
-hydrateAdminAccessKey();
-
-void loadDashboard().catch((error) => {
-  refreshStatus.textContent = `Initial load failed: ${error.message}`;
-  itemsList.innerHTML = '<div class="empty-state">The dashboard could not load the current capture state.</div>';
-  handoffGroups.innerHTML = '<div class="empty-state">The handoff package is unavailable.</div>';
-  handoffJson.textContent = error.message;
+saveIfindBtn.addEventListener("click", async () => {
+  const token = ifindInput.value.trim();
+  logStatus("SAVING IFIND CONFIGURATION...");
+  try {
+    const res = await fetch("/api/v1/config/ifind", {
+      method: "POST",
+      headers: getHeaders(),
+      body: JSON.stringify({ token })
+    });
+    if (!res.ok) {
+      const text = await res.text();
+      throw new Error(text);
+    }
+    logStatus("IFIND CONFIG SAVED.");
+  } catch (err) {
+    logStatus(`IFIND SAVE FAILED: ${err.message}`, true);
+  }
 });
+
+function loadAllData() {
+  fetchDashboard();
+  fetchItems();
+  fetchHandoff();
+}
+
+// Initialization
+logStatus("SYSTEM INITIALIZED. FETCHING TELEMETRY...");
+loadAllData();

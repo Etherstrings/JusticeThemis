@@ -239,6 +239,31 @@ class FakeDailyAnalysisService:
             "direction_calls": [],
             "stock_calls": [],
             "risk_watchpoints": [],
+            "group_report": {
+                "report_type": "group_report",
+                "analysis_date": analysis_date or "2026-04-15",
+                "access_tier": access_tier,
+                "markdown": f"# 群发中长版\n\n- {access_tier} group report\n",
+                "ignored_heat": {
+                    "message_misses": [],
+                    "asset_misses": [
+                        {
+                            "kind": "asset_miss",
+                            "event": "WTI 大涨，但黄金没跟",
+                            "primary_context": [],
+                            "conflict_check": {"status": "no_primary_news_context"},
+                        }
+                    ],
+                    "entries": [],
+                },
+            },
+            "desk_report": {
+                "report_type": "desk_report",
+                "analysis_date": analysis_date or "2026-04-15",
+                "access_tier": access_tier,
+                "markdown": f"# 内参长版\n\n- {access_tier} desk report\n",
+                "continuation_check": {"title": "盘后续线验证", "items": ["中国映射期货当前缺口"]},
+            },
         }
 
 
@@ -271,6 +296,12 @@ def test_backend_live_run_evidence_service_writes_chinese_first_evidence_pack_ev
     summary_md_path = output_dir / "pipeline-summary.md"
     free_report_path = output_dir / "daily-free.md"
     premium_report_path = output_dir / "daily-premium.md"
+    free_group_path = output_dir / "group-report-free.md"
+    premium_group_path = output_dir / "group-report-premium.md"
+    free_desk_path = output_dir / "desk-report-free.md"
+    premium_desk_path = output_dir / "desk-report-premium.md"
+    free_group_json_path = output_dir / "group-report-free.json"
+    premium_desk_json_path = output_dir / "desk-report-premium.json"
 
     assert summary["analysis_date"] == "2026-04-15"
     assert summary["capture"]["collected_items"] == 6
@@ -284,6 +315,12 @@ def test_backend_live_run_evidence_service_writes_chinese_first_evidence_pack_ev
     assert summary_md_path.exists()
     assert free_report_path.exists()
     assert premium_report_path.exists()
+    assert free_group_path.exists()
+    assert premium_group_path.exists()
+    assert free_desk_path.exists()
+    assert premium_desk_path.exists()
+    assert free_group_json_path.exists()
+    assert premium_desk_json_path.exists()
     assert evidence_path.exists()
     assert manifest_path.exists()
 
@@ -297,12 +334,34 @@ def test_backend_live_run_evidence_service_writes_chinese_first_evidence_pack_ev
     assert "market snapshot provider timeout" in evidence_text
     assert str(summary_json_path) in evidence_text
     assert str(free_report_path) in evidence_text
+    assert str(free_group_path) in evidence_text
+    assert str(premium_desk_path) in evidence_text
+
+    assert "# 群发中长版" in free_group_path.read_text(encoding="utf-8")
+    assert "free group report" in free_group_path.read_text(encoding="utf-8")
+    assert "# 内参长版" in premium_desk_path.read_text(encoding="utf-8")
+    assert "premium desk report" in premium_desk_path.read_text(encoding="utf-8")
+
+    free_group_payload = json.loads(free_group_json_path.read_text(encoding="utf-8"))
+    premium_desk_payload = json.loads(premium_desk_json_path.read_text(encoding="utf-8"))
+    assert free_group_payload["report_type"] == "group_report"
+    assert free_group_payload["access_tier"] == "free"
+    assert free_group_payload["ignored_heat"]["asset_misses"][0]["conflict_check"]["status"] == "no_primary_news_context"
+    assert premium_desk_payload["report_type"] == "desk_report"
+    assert premium_desk_payload["access_tier"] == "premium"
+    assert premium_desk_payload["continuation_check"]["items"] == ["中国映射期货当前缺口"]
+    assert "ignored_heat" in free_group_payload
+    assert "message_misses" in free_group_payload["ignored_heat"]
+    assert "asset_misses" in free_group_payload["ignored_heat"]
+    assert "continuation_check" in premium_desk_payload
 
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
     assert manifest["analysis_date"] == "2026-04-15"
     assert manifest["db_path"] == str(db_path)
     assert manifest["artifacts"] == artifacts
     assert any(item["artifact_type"] == "evidence_markdown" for item in artifacts)
+    assert any(item["artifact_type"] == "group_report_free_markdown" for item in artifacts)
+    assert any(item["artifact_type"] == "desk_report_premium_json" for item in artifacts)
 
 
 def test_backend_live_run_evidence_service_uses_unfiltered_recent_items_when_analysis_window_misses_readhub(

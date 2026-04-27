@@ -3,13 +3,14 @@
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Any, Protocol
 
 from app.repository import OvernightRepository
 from app.services.current_window import filter_current_window_items
 from app.services.mainline_engine import MainlineEngine
 from app.services.daily_analysis_provider import DailyAnalysisProvider, RuleBasedDailyAnalysisProvider
+from app.services.result_first_reports import build_result_first_reports
 from app.services.source_capture import OvernightSourceCaptureService
 from app.services.ticker_enrichment import TickerEnrichmentService
 
@@ -113,6 +114,7 @@ class DailyAnalysisService:
                     "error_count": int(enrichment_result.get("error_count", 0) or 0),
                     "trigger_reason": str(enrichment_result.get("trigger_reason", "")).strip(),
                 }
+            report["product_view"] = self._build_product_view(report)
             stored = self.repo.create_daily_analysis_report(
                 analysis_date=resolved_date,
                 access_tier=access_tier,
@@ -121,7 +123,7 @@ class DailyAnalysisService:
                 input_item_ids=input_item_ids,
                 report=report,
             )
-            reports.append(stored)
+            reports.append(self._decorate_report(stored))
         return {
             "analysis_date": resolved_date,
             "reports": reports,
@@ -352,15 +354,72 @@ class DailyAnalysisService:
     ) -> dict[str, Any] | None:
         resolved_date = self._resolve_analysis_date(analysis_date)
         if version is not None:
-            return self.repo.get_daily_analysis_report_version(
+            report = self.repo.get_daily_analysis_report_version(
                 analysis_date=resolved_date,
                 access_tier=access_tier,
                 version=version,
             )
-        return self.repo.get_latest_daily_analysis_report(
+            return self._decorate_report(report)
+        report = self.repo.get_latest_daily_analysis_report(
             analysis_date=resolved_date,
             access_tier=access_tier,
         )
+        return self._decorate_report(report)
+
+    def get_product_report(
+        self,
+        *,
+        analysis_date: str | None = None,
+        access_tier: str = "free",
+        version: int | None = None,
+    ) -> dict[str, Any] | None:
+        report = self.get_daily_report(
+            analysis_date=analysis_date,
+            access_tier=access_tier,
+            version=version,
+        )
+        if report is None:
+            return None
+        return {
+            "analysis_date": report["analysis_date"],
+            "access_tier": report["access_tier"],
+            "report_version": report["version"],
+            "provider": dict(report.get("provider", {}) or {}),
+            "summary": dict(report.get("summary", {}) or {}),
+            "product_view": dict(report.get("product_view", {}) or {}),
+        }
+
+    def get_group_report(
+        self,
+        *,
+        analysis_date: str | None = None,
+        access_tier: str = "free",
+        version: int | None = None,
+    ) -> dict[str, Any] | None:
+        report = self.get_daily_report(
+            analysis_date=analysis_date,
+            access_tier=access_tier,
+            version=version,
+        )
+        if report is None:
+            return None
+        return dict(report.get("group_report", {}) or {})
+
+    def get_desk_report(
+        self,
+        *,
+        analysis_date: str | None = None,
+        access_tier: str = "free",
+        version: int | None = None,
+    ) -> dict[str, Any] | None:
+        report = self.get_daily_report(
+            analysis_date=analysis_date,
+            access_tier=access_tier,
+            version=version,
+        )
+        if report is None:
+            return None
+        return dict(report.get("desk_report", {}) or {})
 
     def list_report_versions(self, *, analysis_date: str | None = None, access_tier: str = "free") -> dict[str, Any]:
         resolved_date = self._resolve_analysis_date(analysis_date)
@@ -398,6 +457,7 @@ class DailyAnalysisService:
         user_prompt = (
             f"请基于 {report['analysis_date']} 的固定日报缓存生成最终中文晨报。"
             f"\n\nsummary:\n{report['summary']}"
+            f"\n\nproduct_view:\n{report.get('product_view', {})}"
             f"\n\nmarket_snapshot:\n{report.get('market_snapshot', {})}"
             f"\n\nnarratives:\n{report.get('narratives', {})}"
             f"\n\ndirection_calls:\n{report.get('direction_calls', [])}"
@@ -427,6 +487,291 @@ class DailyAnalysisService:
             ],
         }
 
+    def _decorate_report(self, report: dict[str, Any] | None) -> dict[str, Any] | None:
+        if not isinstance(report, dict):
+            return None
+        decorated = dict(report)
+        decorated["product_view"] = self._build_product_view(decorated)
+        decorated.update(
+            build_result_first_reports(
+                decorated,
+                source_audit_pack=self._build_source_audit_pack(decorated),
+            )
+        )
+        return decorated
+
+    def _build_product_view(self, report: dict[str, Any]) -> dict[str, Any]:
+        analysis_date = str(report.get("analysis_date", "")).strip()
+        summary = dict(report.get("summary", {}) or {})
+        narratives = dict(report.get("narratives", {}) or {})
+        market_snapshot = dict(report.get("market_snapshot", {}) or {})
+        market_context = dict(report.get("market_context", {}) or {})
+        mainline_coverage = dict(report.get("mainline_coverage", {}) or {})
+        direction_calls = [
+            dict(item or {})
+            for item in list(report.get("direction_calls", []) or [])
+            if isinstance(item, dict)
+        ]
+        stock_calls = [
+            dict(item or {})
+            for item in list(report.get("stock_calls", []) or [])
+            if isinstance(item, dict)
+        ]
+        supporting_items = [
+            dict(item or {})
+            for item in list(report.get("supporting_items", []) or [])
+            if isinstance(item, dict)
+        ]
+        headline_news = [
+            dict(item or {})
+            for item in list(report.get("headline_news", []) or [])
+            if isinstance(item, dict)
+        ]
+        event_drivers = [
+            dict(item or {})
+            for item in list(report.get("event_drivers", []) or [])
+            if isinstance(item, dict)
+        ]
+        risk_watchpoints = [
+            str(item).strip()
+            for item in list(report.get("risk_watchpoints", []) or [])
+            if str(item).strip()
+        ]
+        market_date = str(market_snapshot.get("market_date", "")).strip() or analysis_date
+        source_audit_pack = self._build_source_audit_pack(report)
+        external_market_signals = dict(market_snapshot.get("external_market_signals", {}) or {})
+
+        return {
+            "at_a_glance": {
+                "headline": str(summary.get("headline", "")).strip(),
+                "confidence": str(summary.get("confidence", "")).strip() or "medium",
+                "analysis_date": analysis_date,
+                "market_date": market_date,
+                "news_window_dates": list(dict.fromkeys(date for date in [market_date, analysis_date] if date)),
+                "window_label": (
+                    f"美股市场日 {market_date} 收盘 -> 中国分析日 {analysis_date}"
+                    if market_date and analysis_date
+                    else analysis_date or market_date
+                ),
+                "market_data_status": str(market_context.get("market_data_status", "")).strip() or "unknown",
+                "mainline_status": str(mainline_coverage.get("status", "")).strip() or "unknown",
+                "event_group_count": int(source_audit_pack.get("event_group_count", 0) or 0),
+                "included_item_count": int(source_audit_pack.get("included_item_count", 0) or 0),
+            },
+            "market_judgment": {
+                "market_view": str(narratives.get("market_view", "")).strip(),
+                "policy_view": str(narratives.get("policy_view", "")).strip(),
+                "sector_view": str(narratives.get("sector_view", "")).strip(),
+                "risk_view": str(narratives.get("risk_view", "")).strip(),
+                "execution_view": str(narratives.get("execution_view", "")).strip(),
+            },
+            "sector_judgments": self._product_sector_judgments(direction_calls),
+            "stock_judgments": self._product_stock_judgments(direction_calls, stock_calls),
+            "evidence_chain": self._product_evidence_chain(
+                event_drivers=event_drivers,
+                headline_news=headline_news,
+                supporting_items=supporting_items,
+            ),
+            "follow_up_panel": self._product_follow_up_panel(
+                risk_watchpoints=risk_watchpoints,
+                direction_calls=direction_calls,
+                supporting_items=supporting_items,
+                market_context=market_context,
+                mainline_coverage=mainline_coverage,
+                external_market_signals=external_market_signals,
+            ),
+            "external_signal_panel": self._product_external_signal_panel(market_snapshot),
+            "evidence_summary": {
+                "included_item_count": int(source_audit_pack.get("included_item_count", 0) or 0),
+                "event_group_count": int(source_audit_pack.get("event_group_count", 0) or 0),
+                "official_item_count": len(list(source_audit_pack.get("official_item_ids", []) or [])),
+                "omitted_input_item_count": int(source_audit_pack.get("omitted_input_item_count", 0) or 0),
+            },
+        }
+
+    def _product_sector_judgments(self, direction_calls: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        signal_type_labels = {
+            "beneficiary": "受益方向",
+            "pressured": "承压方向",
+            "price_up": "涨价链",
+        }
+        return [
+            {
+                "direction": str(call.get("direction", "")).strip(),
+                "signal_type": str(call.get("signal_type", "")).strip(),
+                "signal_type_label": signal_type_labels.get(str(call.get("signal_type", "")).strip(), ""),
+                "stance": str(call.get("stance", "")).strip(),
+                "confidence": str(call.get("confidence", "")).strip(),
+                "rationale": str(call.get("rationale", "")).strip(),
+                "event_cluster_count": int(call.get("event_cluster_count", 0) or 0),
+                "source_mix": dict(call.get("source_mix", {}) or {}),
+                "supporting_titles": list(call.get("supporting_titles", []) or []),
+                "evidence_points": list(call.get("evidence_points", []) or []),
+                "follow_up_checks": list(call.get("follow_up_checks", []) or []),
+                "evidence_mainline_ids": list(call.get("evidence_mainline_ids", []) or []),
+                "evidence_regime_ids": list(call.get("evidence_regime_ids", []) or []),
+            }
+            for call in direction_calls[:8]
+        ]
+
+    def _product_stock_judgments(
+        self,
+        direction_calls: list[dict[str, Any]],
+        stock_calls: list[dict[str, Any]],
+    ) -> list[dict[str, Any]]:
+        direction_lookup = {
+            str(call.get("direction", "")).strip(): dict(call)
+            for call in direction_calls
+            if str(call.get("direction", "")).strip()
+        }
+        results: list[dict[str, Any]] = []
+        for call in stock_calls[:12]:
+            direction = str(call.get("direction", "")).strip()
+            linked_direction = direction_lookup.get(direction, {})
+            results.append(
+                {
+                    "ticker": str(call.get("ticker", "")).strip(),
+                    "name": str(call.get("name", "")).strip(),
+                    "direction": direction,
+                    "stance": str(call.get("stance", "")).strip(),
+                    "confidence": str(call.get("confidence", "")).strip(),
+                    "action": str(call.get("action", "")).strip(),
+                    "action_label": str(call.get("action_label", "")).strip(),
+                    "mapping_basis": str(call.get("mapping_basis", "")).strip(),
+                    "reason": str(call.get("reason", "")).strip(),
+                    "linked_mainline_ids": list(call.get("linked_mainline_ids", []) or []),
+                    "linked_regime_ids": list(call.get("linked_regime_ids", []) or []),
+                    "evidence_points": list(linked_direction.get("evidence_points", []) or []),
+                    "follow_up_checks": list(linked_direction.get("follow_up_checks", []) or []),
+                }
+            )
+        return results
+
+    def _product_evidence_chain(
+        self,
+        *,
+        event_drivers: list[dict[str, Any]],
+        headline_news: list[dict[str, Any]],
+        supporting_items: list[dict[str, Any]],
+    ) -> list[dict[str, Any]]:
+        if event_drivers:
+            return [
+                {
+                    "source_name": str(item.get("source_name", "")).strip(),
+                    "title": str(item.get("title", "")).strip(),
+                    "brief": str(item.get("user_brief_cn", "")).strip(),
+                    "why_it_matters": str(item.get("why_it_matters_cn", "")).strip(),
+                    "detail_facts": list(item.get("detail_facts", []) or []),
+                    "coverage_tier": str(item.get("coverage_tier", "")).strip(),
+                }
+                for item in event_drivers[:4]
+            ]
+        if headline_news:
+            return [
+                {
+                    "source_name": str(item.get("source_name", "")).strip(),
+                    "title": str(item.get("title", "")).strip(),
+                    "brief": str(item.get("user_brief_cn", "")).strip() or str(item.get("llm_ready_brief", "")).strip(),
+                    "why_it_matters": str(item.get("why_it_matters_cn", "")).strip(),
+                    "detail_facts": list(item.get("evidence_points", []) or []),
+                    "coverage_tier": str(item.get("coverage_tier", "")).strip(),
+                }
+                for item in headline_news[:4]
+            ]
+        return [
+            {
+                "source_name": str(item.get("source_name", "")).strip(),
+                "title": str(item.get("title", "")).strip(),
+                "brief": str(item.get("llm_ready_brief", "")).strip() or str(item.get("impact_summary", "")).strip(),
+                "why_it_matters": str(item.get("impact_summary", "")).strip(),
+                "detail_facts": list(item.get("evidence_points", []) or []),
+                "coverage_tier": str(item.get("coverage_tier", "")).strip(),
+            }
+            for item in supporting_items[:4]
+        ]
+
+    def _product_follow_up_panel(
+        self,
+        *,
+        risk_watchpoints: list[str],
+        direction_calls: list[dict[str, Any]],
+        supporting_items: list[dict[str, Any]],
+        market_context: dict[str, Any],
+        mainline_coverage: dict[str, Any],
+        external_market_signals: dict[str, Any],
+    ) -> dict[str, Any]:
+        follow_up_checks: list[str] = []
+        for value in risk_watchpoints:
+            if value not in follow_up_checks:
+                follow_up_checks.append(value)
+        for call in direction_calls:
+            for value in list(call.get("follow_up_checks", []) or []):
+                candidate = str(value).strip()
+                if candidate and candidate not in follow_up_checks:
+                    follow_up_checks.append(candidate)
+        for item in supporting_items:
+            for value in list(item.get("follow_up_checks", []) or []):
+                candidate = str(value).strip()
+                if candidate and candidate not in follow_up_checks:
+                    follow_up_checks.append(candidate)
+
+        data_gaps: list[str] = []
+        core_missing_symbols = [
+            str(symbol).strip()
+            for symbol in list(market_context.get("core_missing_symbols", []) or [])
+            if str(symbol).strip()
+        ]
+        if core_missing_symbols:
+            data_gaps.append(f"市场快照核心缺口：{', '.join(core_missing_symbols)}")
+        if str(mainline_coverage.get("status", "")).strip() == "degraded":
+            data_gaps.append("市场主线仍处于降级确认状态。")
+        provider_statuses = dict(external_market_signals.get("provider_statuses", {}) or {})
+        for provider_name, status in provider_statuses.items():
+            normalized_status = str(status).strip()
+            if normalized_status and normalized_status != "ready":
+                data_gaps.append(f"外部信号源 {provider_name} 当前状态 {normalized_status}")
+
+        return {
+            "risk_watchpoints": risk_watchpoints[:8],
+            "follow_up_checks": follow_up_checks[:12],
+            "data_gaps": data_gaps,
+        }
+
+    def _product_external_signal_panel(self, market_snapshot: dict[str, Any]) -> dict[str, Any]:
+        external_market_signals = dict(market_snapshot.get("external_market_signals", {}) or {})
+        prediction_markets = dict(market_snapshot.get("prediction_markets", {}) or {})
+        kalshi_signals = dict(market_snapshot.get("kalshi_signals", {}) or {})
+        fedwatch_signals = dict(market_snapshot.get("fedwatch_signals", {}) or {})
+        cftc_signals = dict(market_snapshot.get("cftc_signals", {}) or {})
+        return {
+            "headline": str(external_market_signals.get("headline", "")).strip(),
+            "provider_statuses": dict(external_market_signals.get("provider_statuses", {}) or {}),
+            "provider_count": int(external_market_signals.get("provider_count", 0) or 0),
+            "ready_provider_count": int(external_market_signals.get("ready_provider_count", 0) or 0),
+            "providers": {
+                "polymarket": {
+                    "status": str(prediction_markets.get("status", "")).strip(),
+                    "headline": str(prediction_markets.get("headline", "")).strip(),
+                    "signal_count": int(prediction_markets.get("signal_count", 0) or 0),
+                },
+                "kalshi": {
+                    "status": str(kalshi_signals.get("status", "")).strip(),
+                    "headline": str(kalshi_signals.get("headline", "")).strip(),
+                    "signal_count": int(kalshi_signals.get("signal_count", 0) or 0),
+                },
+                "cme_fedwatch": {
+                    "status": str(fedwatch_signals.get("status", "")).strip(),
+                    "headline": str(fedwatch_signals.get("headline", "")).strip(),
+                    "meeting_count": int(fedwatch_signals.get("meeting_count", 0) or 0),
+                },
+                "cftc": {
+                    "status": str(cftc_signals.get("status", "")).strip(),
+                    "headline": str(cftc_signals.get("headline", "")).strip(),
+                    "signal_count": int(cftc_signals.get("signal_count", 0) or 0),
+                },
+            },
+        }
+
     def _resolve_analysis_date(self, analysis_date: str | None) -> str:
         candidate = str(analysis_date or "").strip()
         if candidate:
@@ -443,7 +788,20 @@ class DailyAnalysisService:
         market_date = str(dict(market_snapshot or {}).get("market_date", "")).strip()
         if market_date and market_date not in dates:
             dates.append(market_date)
+        followthrough_date = self._next_calendar_date(str(analysis_date or "").strip())
+        if followthrough_date and followthrough_date not in dates:
+            dates.append(followthrough_date)
         return [date for date in dates if date]
+
+    def _next_calendar_date(self, analysis_date: str) -> str:
+        candidate = str(analysis_date or "").strip()
+        if not candidate:
+            return ""
+        try:
+            parsed = datetime.strptime(candidate, "%Y-%m-%d")
+        except ValueError:
+            return ""
+        return (parsed + timedelta(days=1)).date().isoformat()
 
     def _build_source_audit_pack(self, report: dict[str, Any]) -> dict[str, Any]:
         supporting_items = list(report.get("supporting_items", []) or [])

@@ -47,6 +47,7 @@ def _seed_item(
     summary: str,
     published_at: str,
     created_at: str,
+    source_context: dict[str, object] | None = None,
 ) -> int:
     normalized = normalize_candidate(
         SourceCandidate(
@@ -57,6 +58,7 @@ def _seed_item(
             candidate_excerpt_source="body_selector:main",
             candidate_published_at=published_at,
             candidate_published_at_source="rss:published",
+            source_context=source_context,
         )
     )
     raw_id = repo.create_raw_record(
@@ -588,6 +590,58 @@ def test_sources_endpoint_uses_latest_published_item_for_source_summary() -> Non
         assert fed_row["latest_is_timely"] is True
         assert fed_row["freshness_status"] == "fresh"
         assert fed_row["latest_publication_lag_minutes"] == 407
+
+
+def test_sources_endpoint_exposes_conflicted_quality_status_for_search_page_time_mismatch() -> None:
+    with tempfile.TemporaryDirectory() as temp_dir:
+        database = Database(Path(temp_dir) / "test_frontend_source_quality_conflict.db")
+        repo = OvernightRepository(database)
+        _seed_item(
+            repo,
+            source_id="tradingeconomics_hk",
+            url="https://tradingeconomics.com/hong-kong/stock-market/news/491538",
+            title="Hong Kong Shares Down for 4th Session",
+            summary="Hong Kong shares fell again as China data disappointed.",
+            published_at="2026-04-21",
+            created_at="2026-04-25 09:37:27",
+            source_context={
+                "published_at_diagnostics": {
+                    "search_published_at": "2026-04-21",
+                    "search_published_at_source": "search:published",
+                    "page_published_at": "2026-01-05T02:07:09+00:00",
+                    "page_published_at_source": "html:jsonld_datePublished",
+                    "selected_published_at": "2026-04-21",
+                    "selected_published_at_source": "search:published",
+                    "published_at_conflict": True,
+                }
+            },
+        )
+        repo.upsert_source_refresh_state(
+            source_id="tradingeconomics_hk",
+            last_status="ok",
+            last_error="",
+            consecutive_failure_count=0,
+            cooldown_until=None,
+            last_attempted_at="2026-04-25T09:37:30+00:00",
+            last_success_at="2026-04-25T09:37:30+00:00",
+            last_candidate_count=3,
+            last_selected_candidate_count=3,
+            last_persisted_count=3,
+            last_published_at_conflict_count=3,
+            last_elapsed_seconds=0.0,
+        )
+        capture_service = OvernightSourceCaptureService(repo=repo, registry=build_default_source_registry())
+        client = TestClient(create_app(database=database, repo=repo, capture_service=capture_service))
+
+        response = client.get("/api/v1/sources")
+
+        assert response.status_code == 200
+        payload = response.json()
+        row = next(source for source in payload["sources"] if source["source_id"] == "tradingeconomics_hk")
+        assert row["latest_published_at_conflict"] is True
+        assert row["last_published_at_conflict_count"] == 3
+        assert row["quality_status"] == "conflicted"
+        assert "时间冲突" in row["quality_note"]
 
 
 def test_dashboard_endpoint_exposes_market_board_and_ranked_mainlines_when_available() -> None:

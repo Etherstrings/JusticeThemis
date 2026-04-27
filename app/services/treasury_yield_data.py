@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""Official Treasury yield-curve adapter for the 10Y U.S. Treasury yield."""
+"""Official Treasury yield-curve adapter for selected U.S. Treasury tenors."""
 
 from __future__ import annotations
 
@@ -23,11 +23,18 @@ _TREASURY_TZ = ZoneInfo("America/New_York")
 @dataclass(frozen=True)
 class TreasuryYieldRow:
     market_date: str
-    close: float
+    yields: dict[str, float]
 
 
 class TreasuryYieldClient:
-    """Fetch official Treasury 10Y yield rows and normalize them into chart payloads."""
+    """Fetch official Treasury yield rows and normalize them into chart payloads."""
+
+    SUPPORTED_SERIES: dict[str, tuple[str, str]] = {
+        "^UST2Y": ("field-bc-2year", "view-field-bc-2year-table-column"),
+        "^UST5Y": ("field-bc-5year", "view-field-bc-5year-table-column"),
+        "^TNX": ("field-bc-10year", "view-field-bc-10year-table-column"),
+        "^UST30Y": ("field-bc-30year", "view-field-bc-30year-table-column"),
+    }
 
     def __init__(
         self,
@@ -41,12 +48,13 @@ class TreasuryYieldClient:
         self.now_fn = now_fn or (lambda: datetime.now(timezone.utc))
 
     def fetch_chart(self, provider_symbol: str) -> str:
-        if str(provider_symbol).strip() != "^TNX":
+        normalized_symbol = str(provider_symbol).strip()
+        if normalized_symbol not in self.SUPPORTED_SERIES:
             raise RuntimeError(f"Treasury yield client does not support {provider_symbol}")
 
-        rows = self._fetch_recent_rows()
+        rows = self._fetch_recent_rows(provider_symbol=normalized_symbol)
         timestamps = [_treasury_close_timestamp(row.market_date) for row in rows]
-        closes = [row.close for row in rows]
+        closes = [row.yields[normalized_symbol] for row in rows]
         quote_row = {
             "open": closes,
             "high": closes,
@@ -61,7 +69,7 @@ class TreasuryYieldClient:
                         {
                             "meta": {
                                 "currency": "USD",
-                                "symbol": "^TNX",
+                                "symbol": normalized_symbol,
                                 "exchangeName": "U.S. Treasury",
                                 "fullExchangeName": "U.S. Treasury",
                                 "instrumentType": "INDEX",
@@ -84,7 +92,7 @@ class TreasuryYieldClient:
             ensure_ascii=True,
         )
 
-    def _fetch_recent_rows(self) -> list[TreasuryYieldRow]:
+    def _fetch_recent_rows(self, *, provider_symbol: str) -> list[TreasuryYieldRow]:
         rows: list[TreasuryYieldRow] = []
         seen_dates: set[str] = set()
         for year in self._candidate_years():
@@ -106,16 +114,16 @@ class TreasuryYieldClient:
             soup = BeautifulSoup(response.text, "lxml")
             for table_row in soup.select("table tbody tr"):
                 market_date = _extract_market_date(table_row)
-                close = _extract_ten_year_close(table_row)
+                close = _extract_treasury_close(table_row, provider_symbol=provider_symbol, supported_series=self.SUPPORTED_SERIES)
                 if market_date is None or close is None or market_date in seen_dates:
                     continue
-                rows.append(TreasuryYieldRow(market_date=market_date, close=close))
+                rows.append(TreasuryYieldRow(market_date=market_date, yields={provider_symbol: close}))
                 seen_dates.add(market_date)
             if len(rows) >= 2:
                 break
 
         if len(rows) < 2:
-            raise RuntimeError("Treasury yield page did not expose two valid 10Y rows")
+            raise RuntimeError(f"Treasury yield page did not expose two valid rows for {provider_symbol}")
         sorted_rows = sorted(rows, key=lambda row: row.market_date)
         return sorted_rows[-2:]
 
@@ -141,9 +149,15 @@ def _extract_market_date(table_row: object) -> str | None:
     return datetime.strptime(raw_text, "%m/%d/%Y").date().isoformat()
 
 
-def _extract_ten_year_close(table_row: object) -> float | None:
+def _extract_treasury_close(
+    table_row: object,
+    *,
+    provider_symbol: str,
+    supported_series: dict[str, tuple[str, str]],
+) -> float | None:
+    class_name, header_name = supported_series[provider_symbol]
     cell = getattr(table_row, "select_one", lambda _selector: None)(
-        "td.views-field-field-bc-10year, td[headers='view-field-bc-10year-table-column']"
+        f"td.views-field-{class_name}, td[headers='{header_name}']"
     )
     raw_text = cell.get_text(" ", strip=True) if cell is not None else ""
     if not raw_text or raw_text.upper() == "N/A":

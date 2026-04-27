@@ -76,11 +76,28 @@ def build_readiness_report(
         },
         "features": {
             "market_snapshot": {
-                "available": bool(str(os.environ.get("IFIND_REFRESH_TOKEN", "")).strip()),
+                "available": bool(str(os.environ.get("IFIND_REFRESH_TOKEN", "")).strip())
+                or str(os.environ.get("POLYMARKET_ENABLED", "true")).strip().lower() not in {"0", "false", "no", "off"},
                 "ifind_configured": bool(str(os.environ.get("IFIND_REFRESH_TOKEN", "")).strip()),
+                "polymarket_enabled": str(os.environ.get("POLYMARKET_ENABLED", "true")).strip().lower() not in {"0", "false", "no", "off"},
+                "polymarket_signal_configured": bool(str(os.environ.get("POLYMARKET_SIGNAL_CONFIG_JSON", "")).strip()),
+                "kalshi_enabled": str(os.environ.get("KALSHI_ENABLED", "true")).strip().lower() not in {"0", "false", "no", "off"},
+                "kalshi_signal_configured": bool(str(os.environ.get("KALSHI_SIGNAL_CONFIG_JSON", "")).strip()),
+                "cme_fedwatch_enabled": str(os.environ.get("CME_FEDWATCH_ENABLED", "true")).strip().lower() not in {"0", "false", "no", "off"},
+                "cftc_enabled": str(os.environ.get("CFTC_ENABLED", "true")).strip().lower() not in {"0", "false", "no", "off"},
+                "cftc_signal_configured": bool(str(os.environ.get("CFTC_SIGNAL_CONFIG_JSON", "")).strip()),
                 "configured_env_names": [
                     name
-                    for name in ("IFIND_REFRESH_TOKEN",)
+                    for name in (
+                        "IFIND_REFRESH_TOKEN",
+                        "POLYMARKET_ENABLED",
+                        "POLYMARKET_SIGNAL_CONFIG_JSON",
+                        "KALSHI_ENABLED",
+                        "KALSHI_SIGNAL_CONFIG_JSON",
+                        "CME_FEDWATCH_ENABLED",
+                        "CFTC_ENABLED",
+                        "CFTC_SIGNAL_CONFIG_JSON",
+                    )
                     if str(os.environ.get(name, "")).strip()
                 ],
             },

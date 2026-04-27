@@ -1,0 +1,166 @@
+{
+  "analysis_date": "2026-04-25",
+  "time_window": {
+    "label": "美东收盘后到中国早晨",
+    "start_at": "2026-04-24T16:00:00-04:00",
+    "end_at": "2026-04-25T08:30:00+08:00"
+  },
+  "editorial_rules": {
+    "goal": "先把这段时差里全球所有和钱相关的事情收干净，再交给后面的对照模块",
+    "max_items_per_group": 6,
+    "dedupe_enabled": true,
+    "explanation_style": "一句人话"
+  },
+  "headline_items": [
+    {
+      "id": "macro-fed-001",
+      "group_id": "fed-cut-path-apr24",
+      "topic": "macro_policy",
+      "importance_tier": "must_read",
+      "title": "美联储降息路径预期再起变化",
+      "summary": "联储官员最新表态和利率期货一起推高了年内降息预期分歧。",
+      "why_it_matters": "这会直接影响美债、美元和成长股定价。",
+      "linked_assets": [
+        "UST2Y",
+        "DXY",
+        "NASDAQ100"
+      ],
+      "published_at": "2026-04-24T18:20:00-04:00",
+      "source": {
+        "site_name": "华尔街见闻",
+        "provider_type": "newswire"
+      },
+      "dedupe_note": "同主题的 4 条报道已合并"
+    },
+    {
+      "id": "geo-oil-002",
+      "group_id": "middle-east-shipping-apr24",
+      "topic": "geopolitics",
+      "importance_tier": "must_read",
+      "title": "中东航运与谈判消息继续左右风险偏好",
+      "summary": "地缘谈判反复，但市场先交易局势不会立刻失控。",
+      "why_it_matters": "油价、军工、避险资产和股市风险偏好会同时被牵动。",
+      "linked_assets": [
+        "BRENT",
+        "GOLD",
+        "SPX"
+      ],
+      "published_at": "2026-04-24T17:45:00-04:00",
+      "source": {
+        "site_name": "Reuters",
+        "provider_type": "newswire"
+      },
+      "dedupe_note": "同主题的 3 条报道已合并"
+    }
+  ],
+  "grouped_items": {
+    "macro_policy": [
+      {
+        "id": "macro-fed-001",
+        "title": "美联储降息路径预期再起变化",
+        "importance_tier": "must_read",
+        "summary": "联储官员表态和利率期货变化，重新拉高了市场对年内降息节奏的争论。",
+        "why_it_matters": "先看债和汇，再看成长股估值。"
+      }
+    ],
+    "geopolitics": [
+      {
+        "id": "geo-oil-002",
+        "title": "中东航运与谈判消息继续左右风险偏好",
+        "importance_tier": "must_read",
+        "summary": "市场把地缘消息先映射成油价和避险资产波动。",
+        "why_it_matters": "地缘没有结束，但资金先交易边际缓和。"
+      }
+    ],
+    "equity_and_sector_moves": [
+      {
+        "id": "eq-chip-003",
+        "group_id": "semis-rally-apr24",
+        "topic": "equity_and_sector_moves",
+        "importance_tier": "must_read",
+        "title": "半导体继续领涨，AI 硬件还是最强主线",
+        "summary": "英特尔大涨带动芯片链继续冲高，风险偏好集中回到科技硬件。",
+        "why_it_matters": "这说明市场还在用业绩和供给周期去抬升 AI 硬件权重。",
+        "linked_assets": [
+          "INTC",
+          "NVDA",
+          "SOX"
+        ],
+        "published_at": "2026-04-24T16:10:00-04:00",
+        "source": {
+          "site_name": "36氪",
+          "provider_type": "aggregated_news"
+        }
+      }
+    ],
+    "rates_and_fx": [
+      {
+        "id": "rates-usd-004",
+        "group_id": "rates-fx-apr24",
+        "topic": "rates_and_fx",
+        "importance_tier": "important",
+        "title": "短端美债回落，美元偏弱",
+        "summary": "市场风险偏好回升后，短端收益率和美元都出现回落。",
+        "why_it_matters": "这是典型的“利率压力缓一点，成长股更敢涨”的组合。 ",
+        "linked_assets": [
+          "UST2Y",
+          "DXY",
+          "EURUSD"
+        ],
+        "published_at": "2026-04-24T20:00:00-04:00",
+        "source": {
+          "site_name": "market_snapshot",
+          "provider_type": "market_data"
+        }
+      }
+    ],
+    "commodities": [
+      {
+        "id": "cmd-oil-005",
+        "group_id": "oil-gold-copper-apr24",
+        "topic": "commodities",
+        "importance_tier": "important",
+        "title": "油强金稳铜跟随风险偏好修复",
+        "summary": "原油受地缘影响偏强，黄金没有失速，铜跟着风险偏好回暖。",
+        "why_it_matters": "说明资金没有单边跑避险，而是在做更复杂的再配置。",
+        "linked_assets": [
+          "BRENT",
+          "GOLD",
+          "COPPER"
+        ],
+        "published_at": "2026-04-24T21:30:00-04:00",
+        "source": {
+          "site_name": "market_snapshot",
+          "provider_type": "market_data"
+        }
+      }
+    ],
+    "tech_ai_and_major_companies": [
+      {
+        "id": "tech-meta-006",
+        "group_id": "meta-aws-chip-apr24",
+        "topic": "tech_ai_and_major_companies",
+        "importance_tier": "important",
+        "title": "Meta 与亚马逊芯片合作放大 AI 基建叙事",
+        "summary": "大厂之间开始直接重排算力采购和芯片依赖关系。",
+        "why_it_matters": "这不是一条普通公司新闻，它会改写未来一段时间的算力链分工。",
+        "linked_assets": [
+          "META",
+          "AMZN",
+          "AI_INFRA"
+        ],
+        "published_at": "2026-04-24T10:00:00+08:00",
+        "source": {
+          "site_name": "36氪",
+          "provider_type": "aggregated_news"
+        }
+      }
+    ]
+  },
+  "source_status": {
+    "news": "ok",
+    "market": "ok",
+    "podcast": "partial",
+    "github_trending": "ok"
+  }
+}

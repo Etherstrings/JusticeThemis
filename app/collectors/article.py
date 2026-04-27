@@ -338,9 +338,19 @@ def _normalize_published_at_value(value: str) -> str | None:
     except (TypeError, ValueError):
         pass
 
-    for pattern in ("%B %d, %Y", "%b %d, %Y", "%Y-%m-%d", "%m/%d/%Y"):
+    for pattern in (
+        "%B %d, %Y - %I:%M %p",
+        "%b %d, %Y - %I:%M %p",
+        "%B %d, %Y",
+        "%b %d, %Y",
+        "%Y-%m-%d",
+        "%m/%d/%Y",
+    ):
         try:
-            return datetime.strptime(candidate, pattern).date().isoformat()
+            parsed = datetime.strptime(candidate, pattern)
+            if "%I:%M %p" in pattern:
+                return parsed.isoformat()
+            return parsed.date().isoformat()
         except ValueError:
             continue
 
@@ -984,6 +994,15 @@ def _pick_better_published_at(
     current_rank = _published_source_rank(current_source)
     new_rank = _published_source_rank(new_source)
 
+    current_dt = _normalize_published_at_value(current_value)
+    new_dt = _normalize_published_at_value(new_value)
+    if current_dt and new_dt and current_source.startswith("search:") and new_source.startswith("html:"):
+        # Search providers already bias toward the requested recent window. For sites like SCMP,
+        # embedded HTML metadata may point to stale revision/archive timestamps and should not
+        # override a clearly newer search-discovered publish date.
+        if new_dt < current_dt:
+            return current_value, current_source
+
     if new_precision > current_precision and new_rank >= current_rank:
         return new_value, new_source
     if new_rank > current_rank and new_precision == current_precision and new_value != current_value:
@@ -1041,6 +1060,21 @@ class ArticleCollector:
             published_at,
             published_at_source,
         )
+        source_context = dict(candidate.source_context or {})
+        if candidate.candidate_published_at or published_at:
+            source_context["published_at_diagnostics"] = {
+                "search_published_at": str(candidate.candidate_published_at or "").strip() or None,
+                "search_published_at_source": str(candidate.candidate_published_at_source or "").strip() or None,
+                "page_published_at": str(published_at or "").strip() or None,
+                "page_published_at_source": str(published_at_source or "").strip() or None,
+                "selected_published_at": str(selected_published_at or "").strip() or None,
+                "selected_published_at_source": str(selected_published_at_source or "").strip() or None,
+                "published_at_conflict": bool(
+                    str(candidate.candidate_published_at or "").strip()
+                    and str(published_at or "").strip()
+                    and str(candidate.candidate_published_at).strip() != str(published_at).strip()
+                ),
+            }
         selected_summary, selected_source = _pick_better_summary(candidate.candidate_summary, canonical_summary)
         selected_title = _pick_better_title(candidate.candidate_title, canonical_title)
         return replace(
@@ -1054,5 +1088,6 @@ class ArticleCollector:
             candidate_excerpt_source=selected_source or excerpt_source or candidate.candidate_excerpt_source,
             candidate_published_at=selected_published_at,
             candidate_published_at_source=selected_published_at_source,
+            source_context=source_context,
             needs_article_fetch=False,
         )

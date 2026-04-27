@@ -1,14 +1,17 @@
 from pathlib import Path
 
 from fastapi import FastAPI, Header, HTTPException
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
+from pydantic import BaseModel
+import os
 
 from app.api_access import build_readiness_report, require_admin_access, require_premium_access
 from app.db import Database
 from app.product_identity import PRODUCT_NAME
 from app.repository import OvernightRepository
-from app.runtime_config import load_runtime_environment
+from app.runtime_config import list_frontend_allowed_origins, load_runtime_environment, PROJECT_ROOT
 from app.runtime_defaults import (
     DEFAULT_CAPTURE_LIMIT_PER_SOURCE,
     DEFAULT_CAPTURE_MAX_SOURCES,
@@ -18,6 +21,7 @@ from app.services.daily_analysis import DailyAnalysisService
 from app.services.current_window import filter_current_window_items
 from app.services.frontend_api import FrontendApiService
 from app.services.handoff import HandoffService
+from app.services.intel_payloads import OvernightIntelPayloadService
 from app.services.market_snapshot import UsMarketSnapshotService
 from app.services.mmu_handoff import MMUHandoffService
 from app.services.pipeline_blueprint import PipelineBlueprintService
@@ -26,12 +30,16 @@ from app.sources.registry import build_default_source_registry
 
 UI_DIR = Path(__file__).parent / "ui"
 
+class IFindConfigPayload(BaseModel):
+    token: str
+
 def create_app(
     *,
     database: Database | None = None,
     repo: OvernightRepository | None = None,
     capture_service: OvernightSourceCaptureService | None = None,
     handoff_service: HandoffService | None = None,
+    intel_payload_service: OvernightIntelPayloadService | None = None,
     frontend_api_service: FrontendApiService | None = None,
     daily_analysis_service: DailyAnalysisService | None = None,
     market_snapshot_service: UsMarketSnapshotService | None = None,
@@ -55,6 +63,10 @@ def create_app(
         repo=repo,
         registry=registry,
     )
+    intel_payload_service = intel_payload_service or OvernightIntelPayloadService(
+        capture_service=presentation_capture_service,
+        market_snapshot_service=market_snapshot_service,
+    )
     frontend_api_service = frontend_api_service or FrontendApiService(
         repo=repo,
         capture_service=presentation_capture_service,
@@ -72,6 +84,13 @@ def create_app(
     )
 
     app = FastAPI(title=PRODUCT_NAME)
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=list_frontend_allowed_origins(),
+        allow_credentials=False,
+        allow_methods=["*"],
+        allow_headers=["*"],
+    )
     app.mount("/ui", StaticFiles(directory=UI_DIR), name="ui")
 
     @app.get("/", include_in_schema=False)
@@ -138,6 +157,39 @@ def create_app(
             recent_limit=max(1, int(recent_limit)),
         )
 
+    @app.post("/api/v1/config/ifind")
+    def update_ifind_config(
+        payload: IFindConfigPayload,
+        x_admin_access_key: str | None = Header(default=None, alias="X-Admin-Access-Key"),
+    ) -> dict[str, str]:
+        # Optional: Require admin if the system uses it
+        if x_admin_access_key:
+            require_admin_access(x_admin_access_key)
+
+        token = payload.token.strip()
+        os.environ["IFIND_REFRESH_TOKEN"] = token
+
+        env_file = PROJECT_ROOT / ".env"
+        lines = []
+        if env_file.exists():
+            lines = env_file.read_text(encoding="utf-8").splitlines()
+
+        new_lines = []
+        found = False
+        for line in lines:
+            if line.startswith("IFIND_REFRESH_TOKEN="):
+                new_lines.append(f"IFIND_REFRESH_TOKEN={token}")
+                found = True
+            else:
+                new_lines.append(line)
+
+        if not found:
+            new_lines.append(f"IFIND_REFRESH_TOKEN={token}")
+
+        env_file.write_text("\n".join(new_lines) + "\n", encoding="utf-8")
+
+        return {"status": "ok", "message": "iFind token updated"}
+
     @app.get("/api/v1/news")
     def list_frontend_news(
         tab: str = "all",
@@ -171,6 +223,42 @@ def create_app(
     def list_frontend_sources() -> dict[str, object]:
         return frontend_api_service.list_sources()
 
+    @app.get("/api/v1/intel/source")
+    def get_source_intel_payload(
+        analysis_date: str | None = None,
+        limit: int = 60,
+        include_stale: bool = False,
+    ) -> dict[str, object]:
+        return intel_payload_service.get_source_intel_payload(
+            analysis_date=analysis_date,
+            limit=max(20, int(limit)),
+            include_stale=include_stale,
+        )
+
+    @app.get("/api/v1/intel/world-money-flow")
+    def get_world_money_flow_payload(
+        analysis_date: str | None = None,
+        limit: int = 60,
+        include_stale: bool = False,
+    ) -> dict[str, object]:
+        return intel_payload_service.get_yesterday_world_money_flow_payload(
+            analysis_date=analysis_date,
+            limit=max(20, int(limit)),
+            include_stale=include_stale,
+        )
+
+    @app.get("/api/v1/intel/world-money-flow-image")
+    def get_world_money_flow_image_payload(
+        analysis_date: str | None = None,
+        limit: int = 60,
+        include_stale: bool = False,
+    ) -> dict[str, object]:
+        return intel_payload_service.get_world_money_flow_image_payload(
+            analysis_date=analysis_date,
+            limit=max(20, int(limit)),
+            include_stale=include_stale,
+        )
+
     @app.post("/api/v1/market/us/refresh")
     def refresh_us_market_snapshot(
         x_admin_access_key: str | None = Header(default=None, alias="X-Admin-Access-Key"),
@@ -183,6 +271,13 @@ def create_app(
         payload = market_snapshot_service.get_daily_snapshot(analysis_date=analysis_date)
         if payload is None:
             raise HTTPException(status_code=404, detail="U.S. market snapshot not found")
+        return payload
+
+    @app.get("/api/v1/market/external-signals/daily")
+    def get_external_market_signals(analysis_date: str | None = None) -> dict[str, object]:
+        payload = market_snapshot_service.get_external_signals(analysis_date=analysis_date)
+        if payload is None:
+            raise HTTPException(status_code=404, detail="External market signals not found")
         return payload
 
     @app.post("/api/v1/analysis/daily/generate")
@@ -205,6 +300,66 @@ def create_app(
             require_premium_access(x_premium_access_key)
 
         payload = daily_analysis_service.get_daily_report(
+            analysis_date=analysis_date,
+            access_tier=normalized_tier,
+            version=version,
+        )
+        if payload is None:
+            raise HTTPException(status_code=404, detail="Daily analysis not found")
+        return payload
+
+    @app.get("/api/v1/analysis/daily/product")
+    def get_daily_analysis_product_view(
+        analysis_date: str | None = None,
+        tier: str = "free",
+        version: int | None = None,
+        x_premium_access_key: str | None = Header(default=None, alias="X-Premium-Access-Key"),
+    ) -> dict[str, object]:
+        normalized_tier = tier.strip() or "free"
+        if normalized_tier == "premium":
+            require_premium_access(x_premium_access_key)
+
+        payload = daily_analysis_service.get_product_report(
+            analysis_date=analysis_date,
+            access_tier=normalized_tier,
+            version=version,
+        )
+        if payload is None:
+            raise HTTPException(status_code=404, detail="Daily analysis not found")
+        return payload
+
+    @app.get("/api/v1/analysis/daily/group-report")
+    def get_daily_analysis_group_report(
+        analysis_date: str | None = None,
+        tier: str = "free",
+        version: int | None = None,
+        x_premium_access_key: str | None = Header(default=None, alias="X-Premium-Access-Key"),
+    ) -> dict[str, object]:
+        normalized_tier = tier.strip() or "free"
+        if normalized_tier == "premium":
+            require_premium_access(x_premium_access_key)
+
+        payload = daily_analysis_service.get_group_report(
+            analysis_date=analysis_date,
+            access_tier=normalized_tier,
+            version=version,
+        )
+        if payload is None:
+            raise HTTPException(status_code=404, detail="Daily analysis not found")
+        return payload
+
+    @app.get("/api/v1/analysis/daily/desk-report")
+    def get_daily_analysis_desk_report(
+        analysis_date: str | None = None,
+        tier: str = "free",
+        version: int | None = None,
+        x_premium_access_key: str | None = Header(default=None, alias="X-Premium-Access-Key"),
+    ) -> dict[str, object]:
+        normalized_tier = tier.strip() or "free"
+        if normalized_tier == "premium":
+            require_premium_access(x_premium_access_key)
+
+        payload = daily_analysis_service.get_desk_report(
             analysis_date=analysis_date,
             access_tier=normalized_tier,
             version=version,

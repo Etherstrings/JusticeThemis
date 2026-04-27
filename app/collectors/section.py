@@ -43,6 +43,8 @@ _ARTICLE_PATH_PATTERNS = (
     re.compile(r"/20\d{2}/"),
     re.compile(r"/news/20\d{2}/"),
     re.compile(r"/articles?/"),
+    re.compile(r"/insights/[a-z0-9-]+/?$"),
+    re.compile(r"/web/[a-z0-9-]+/?$"),
     re.compile(r"/press-releases?/"),
     re.compile(r"/pressroom/releases?/"),
     re.compile(r"/briefing-room/"),
@@ -75,6 +77,7 @@ _HUB_PATH_PATTERNS = (
 _VIDEO_PATH_PATTERN = re.compile(r"/video/")
 _TREASURY_RELEASE_PATTERN = re.compile(r"/news/press-releases?/sb\d+$")
 _MAX_SECTION_CANDIDATES_PER_ENTRY_URL = 40
+_RAW_HTML_FALLBACK_SOURCE_IDS = frozenset({"fastmarkets_markets"})
 
 
 def _fetch_payload(http_client: object, url: str) -> str:
@@ -164,7 +167,49 @@ class SectionCollector:
                 candidates.append(candidate)
                 page_candidate_count += 1
 
+            if page_candidate_count == 0 and source.source_id in _RAW_HTML_FALLBACK_SOURCE_IDS:
+                for candidate in _extract_raw_html_article_candidates(html, page_url=page_url, source=source):
+                    if page_candidate_count >= _MAX_SECTION_CANDIDATES_PER_ENTRY_URL:
+                        break
+                    if candidate.candidate_url in seen_urls:
+                        continue
+                    seen_urls.add(candidate.candidate_url)
+                    candidates.append(candidate)
+                    page_candidate_count += 1
+
         return candidates
+
+
+def _extract_raw_html_article_candidates(html: str, *, page_url: str, source: SourceDefinition) -> list[SourceCandidate]:
+    candidates: list[SourceCandidate] = []
+    seen_urls: set[str] = set()
+    for match in re.findall(r'https?://[^"\'\s<>]+', html):
+        candidate_url = match.strip()
+        lowered_url = candidate_url.lower()
+        if any(lowered_url.endswith(suffix) for suffix in ('.png', '.jpg', '.jpeg', '.gif', '.webp', '.svg')):
+            continue
+        if candidate_url in seen_urls:
+            continue
+        if not is_source_url_allowed(candidate_url, source):
+            continue
+        if not _looks_like_article_url(candidate_url, page_url=page_url):
+            continue
+        seen_urls.add(candidate_url)
+        candidates.append(
+            SourceCandidate(
+                candidate_type="section_card",
+                candidate_url=candidate_url,
+                candidate_title=candidate_url.rstrip("/").split("/")[-1].replace("-", " ").strip(),
+                candidate_summary="",
+                candidate_published_at=None,
+                candidate_published_at_source="",
+                candidate_section=source.display_name,
+                candidate_tags=(),
+                needs_article_fetch=True,
+                needs_attachment_fetch=False,
+            )
+        )
+    return candidates
 
 
 def _build_card_candidate(card: Tag, *, page_url: str, source: SourceDefinition) -> SourceCandidate | None:
@@ -315,6 +360,12 @@ def _extract_nearby_published_at(anchor: Tag) -> str | None:
     for container in _nearby_containers(anchor, max_depth=3):
         time_node = container.find("time")
         if time_node is None:
+            text_value = container.get_text(" ", strip=True)
+            text_match = re.search(r"\b(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\s+\d{1,2},\s+20\d{2}\b", text_value)
+            if text_match is not None:
+                normalized = _normalize_card_date(text_match.group(0))
+                if normalized:
+                    return normalized
             continue
         raw_datetime = (time_node.get("datetime") or time_node.get_text(" ", strip=True)).strip() or None
         normalized = _normalize_card_date(raw_datetime)

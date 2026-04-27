@@ -23,6 +23,8 @@ The current implementation does **not** yet call an external model provider inli
 | --- | --- |
 | `POST /api/v1/analysis/daily/generate` | Generate and cache the fixed daily reports for one date |
 | `GET /api/v1/analysis/daily` | Read the latest cached report for one date and tier |
+| `GET /api/v1/analysis/daily/desk-report` | Read the result-first `desk_report` long-form product for one date and tier |
+| `GET /api/v1/analysis/daily/group-report` | Read the result-first `group_report` sendable mid-long product for one date and tier |
 | `GET /api/v1/analysis/daily/versions` | List cached versions for one date and tier |
 | `GET /api/v1/analysis/daily/prompt` | Read a provider-agnostic prompt bundle based on the latest cached report |
 
@@ -32,6 +34,9 @@ The current implementation does **not** yet call an external model provider inli
 - The system generates two reports for the same date:
   - `free`
   - `premium`
+- Each cached daily report now derives two additional result-first products from the same fact base:
+  - `desk_report`: a thick internal morning note that keeps all seven buckets and calls out data gaps directly
+  - `group_report`: a sendable five-section mid-long note that still starts from market results rather than generic summary prose
 - Regeneration creates a new `version` instead of overwriting the previous one.
 - Read requests always return the latest version for that date and tier.
 - The report is ordered around completed overnight results first, then ranked `mainlines`, then A-share direction/stock mappings.
@@ -182,6 +187,41 @@ Status: `403`
 
 Status: `404`
 
+## `GET /api/v1/analysis/daily/group-report`
+
+This endpoint returns the derived `group_report` object for the requested date/tier.
+
+The object is JSON-first, and it also carries a ready-to-export `markdown` field.
+
+Key contract:
+
+- fixed section order:
+  - `一句定盘`
+  - `结果数据层`
+  - `新闻/信息层`
+  - `昨晚市场没认的消息`
+  - `A股今天怎么打`
+- result buckets keep the fixed seven-bucket ordering and omit empty buckets in the group version
+- every result row is rendered as `方向词 + 具体数值`
+- non-empty result buckets may carry an additive `texture` object; current first-stage coverage is `us_equities` and `china_proxy`
+- `ignored_heat` is now matrix-shaped: it keeps backward-compatible `entries`, and also exposes `message_misses` plus `asset_misses`
+- news buckets are now layered: they keep backward-compatible `entries`, and also expose `primary_entries` plus `background_entries`
+
+## `GET /api/v1/analysis/daily/desk-report`
+
+This endpoint returns the derived `desk_report` object for the requested date/tier.
+
+The object is JSON-first, and it also carries a ready-to-export `markdown` field.
+
+Key contract:
+
+- keeps the same seven-bucket result ordering as the group product
+- retains empty buckets and marks them as `当前没货` or `当前缺口`
+- expands the news/explanation layer and adds explicit `归因层` and `数据缺口层`
+- non-empty result buckets may carry an additive `texture` object; current first-stage coverage is `us_equities` and `china_proxy`
+- `ignored_heat` is now matrix-shaped: it keeps backward-compatible `entries`, and also exposes `message_misses` plus `asset_misses`
+- news buckets are now layered: they keep backward-compatible `entries`, and also expose `primary_entries` plus `background_entries`
+
 ## Field Semantics
 
 ### Top-Level Metadata
@@ -299,6 +339,86 @@ Use it to show:
 - rates, FX, precious metals, energy, and industrial-metals context
 - China-facing futures watch rows under `china_mapped_futures`
 - the normalized cross-asset `asset_board` object for model/UI reuse
+
+### Result-First Bucket Texture
+
+This is an additive field on result buckets inside `desk_report.result_data.buckets[]` and `group_report.result_data.buckets[]`.
+
+Current notes:
+
+- treat `texture` as optional
+- first-stage guaranteed coverage only exists for `美股指数与板块` and `国内资产映射`
+- markdown exporters may render it as one extra line: `盘面纹理：...`
+
+| Field | Meaning |
+| --- | --- |
+| `texture.market_shape` | One of `普涨` / `普跌` / `结构分化` / `一般` |
+| `texture.leaders` | Top rows that are clearly holding the bucket up |
+| `texture.laggards` | Top rows that are clearly dragging the bucket down |
+| `texture.texture_line` | One-line straight summary of the bucket's internal structure, suitable for markdown export |
+
+### Desk Continuation Check
+
+This is a desk-only additive block on `desk_report.continuation_check`.
+
+Current notes:
+
+- group report does not expose this block
+- it reuses existing `china_mapped_futures` and `external_signal_panel` data
+- if there is not enough watch data, it should explicitly say the continuation check has a gap instead of guessing
+
+| Field | Meaning |
+| --- | --- |
+| `continuation_check.items[]` | Lightweight follow-through check for whether the overnight mainline has a usable post-close continuation signal |
+
+### Ignored Heat Matrix
+
+This is an additive field on `group_report.ignored_heat` and `desk_report.ignored_heat`.
+
+Current notes:
+
+- `entries` is retained for backward compatibility
+- new consumers should prefer `message_misses` and `asset_misses`
+- markdown exporters may render the same section as two blocks: `消息没认` and `资产没认`
+
+| Field | Meaning |
+| --- | --- |
+| `ignored_heat.message_misses` | Hot public messages that did not make the strong evidence chain |
+| `ignored_heat.asset_misses` | Cross-asset mismatches where the expected linked assets did not move together |
+| `ignored_heat.entries` | Backward-compatible flattened list: `message_misses + asset_misses` |
+
+Each `asset_misses[]` row includes the common `source / event / reason / line / related_buckets` fields and also exposes:
+
+| Field | Meaning |
+| --- | --- |
+| `asset_misses[].strength` | Deterministic mismatch score used for ordering stronger observed dislocations first |
+| `asset_misses[].observed_rows` | The concrete result rows used to form the mismatch line, preserving symbols, display names, direction words, and values |
+| `asset_misses[].primary_context` | Primary-news context from the related result buckets, when available, so consumers can see which main-cause lines were checked against the price mismatch |
+| `asset_misses[].conflict_check` | Deterministic status object explaining whether related primary-news context was available for the mismatch check |
+| `asset_misses[].audit_line` | Desk-friendly audit sentence derived from `conflict_check`; desk markdown may render it, group markdown omits it to stay sendable |
+
+### News Bucket Layering
+
+This is an additive field on each bucket inside `group_report.news_layer.buckets[]` and `desk_report.news_layer.buckets[]`.
+
+Current notes:
+
+- `entries` is retained for backward compatibility
+- new consumers should prefer `primary_entries` and `background_entries`
+- markdown exporters may render the same bucket as two blocks: `主因` and `背景`
+
+| Field | Meaning |
+| --- | --- |
+| `news_layer.buckets[].primary_entries` | The strongest same-bucket entries that directly explain the price result |
+| `news_layer.buckets[].background_entries` | Same-topic but weaker supporting context that should not overwrite the main cause |
+| `news_layer.buckets[].entries` | Backward-compatible flattened list: `primary_entries + background_entries` |
+
+Each `background_entries[]` row keeps the normal news-entry fields and may also expose:
+
+| Field | Meaning |
+| --- | --- |
+| `background_entries[].background_reason` | Deterministic reason explaining why the entry was kept as background instead of primary cause |
+| `background_entries[].event_cluster_overlap` | Cluster comparison against the strongest primary entry, including `entry_cluster_id`, `primary_cluster_id`, `same_cluster`, and `shared_topic_tags` |
 
 ### `mainlines`
 

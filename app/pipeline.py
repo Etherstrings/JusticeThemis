@@ -25,6 +25,7 @@ from app.runtime_defaults import (
 )
 from app.services.daily_analysis import DailyAnalysisService
 from app.services.handoff import HandoffService
+from app.services.intel_payloads import OvernightIntelPayloadService
 from app.services.market_snapshot import UsMarketSnapshotService
 from app.services.mmu_handoff import MMUHandoffService
 from app.services.pipeline_artifacts import PipelineArtifactService
@@ -33,11 +34,14 @@ from app.services.pipeline_delivery import PipelineDeliveryService
 from app.services.pipeline_health import PipelineHealthService
 from app.services.pipeline_markdown import (
     render_daily_report_markdown,
+    render_desk_report_markdown,
+    render_group_report_markdown,
     render_pipeline_blueprint_markdown,
     render_pipeline_summary_markdown,
 )
 from app.services.pipeline_runner import OvernightPipelineService
 from app.services.source_capture import OvernightSourceCaptureService
+from app.services.world_money_flow_renderer import render_world_money_flow_png
 from app.sources.registry import build_default_source_registry
 
 PIPELINE_ENV_NAMES: tuple[str, ...] = (
@@ -58,6 +62,7 @@ class RuntimeServices:
     market_snapshot_service: UsMarketSnapshotService
     daily_analysis_service: DailyAnalysisService
     handoff_service: HandoffService
+    intel_payload_service: OvernightIntelPayloadService
     mmu_handoff_service: MMUHandoffService
     pipeline_blueprint_service: PipelineBlueprintService
     artifact_service: PipelineArtifactService
@@ -81,6 +86,10 @@ def build_runtime_services(*, db_path: str | Path | None = None) -> RuntimeServi
     )
     market_snapshot_service = UsMarketSnapshotService(repo=repo)
     handoff_service = HandoffService(
+        capture_service=capture_service,
+        market_snapshot_service=market_snapshot_service,
+    )
+    intel_payload_service = OvernightIntelPayloadService(
         capture_service=capture_service,
         market_snapshot_service=market_snapshot_service,
     )
@@ -109,6 +118,7 @@ def build_runtime_services(*, db_path: str | Path | None = None) -> RuntimeServi
         market_snapshot_service=market_snapshot_service,
         daily_analysis_service=daily_analysis_service,
         handoff_service=handoff_service,
+        intel_payload_service=intel_payload_service,
         mmu_handoff_service=mmu_handoff_service,
         pipeline_blueprint_service=pipeline_blueprint_service,
         artifact_service=artifact_service,
@@ -180,11 +190,23 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument("--summary-markdown-path", default="", help="Optional Markdown summary artifact path.")
     parser.add_argument("--daily-free-markdown-path", default="", help="Optional Markdown export path for the free daily report.")
     parser.add_argument("--daily-premium-markdown-path", default="", help="Optional Markdown export path for the premium daily report.")
+    parser.add_argument("--group-report-free-markdown-path", default="", help="Optional Markdown export path for the free group report.")
+    parser.add_argument("--group-report-premium-markdown-path", default="", help="Optional Markdown export path for the premium group report.")
+    parser.add_argument("--desk-report-free-markdown-path", default="", help="Optional Markdown export path for the free desk report.")
+    parser.add_argument("--desk-report-premium-markdown-path", default="", help="Optional Markdown export path for the premium desk report.")
+    parser.add_argument("--group-report-free-json-path", default="", help="Optional JSON export path for the free group report.")
+    parser.add_argument("--group-report-premium-json-path", default="", help="Optional JSON export path for the premium group report.")
+    parser.add_argument("--desk-report-free-json-path", default="", help="Optional JSON export path for the free desk report.")
+    parser.add_argument("--desk-report-premium-json-path", default="", help="Optional JSON export path for the premium desk report.")
     parser.add_argument("--blueprint-json-path", default="", help="Optional JSON export path for the pipeline blueprint.")
     parser.add_argument("--blueprint-markdown-path", default="", help="Optional Markdown export path for the pipeline blueprint.")
     parser.add_argument("--daily-free-prompt-path", default="", help="Optional JSON export path for the free prompt bundle.")
     parser.add_argument("--daily-premium-prompt-path", default="", help="Optional JSON export path for the premium prompt bundle.")
     parser.add_argument("--mmu-handoff-path", default="", help="Optional JSON export path for the staged MMU handoff bundle.")
+    parser.add_argument("--source-intel-json-path", default="", help="Optional JSON export path for the source-intel payload.")
+    parser.add_argument("--world-money-flow-json-path", default="", help="Optional JSON export path for the yesterday-world-money-flow payload.")
+    parser.add_argument("--world-money-flow-image-json-path", default="", help="Optional JSON export path for the image-ready world-money-flow payload.")
+    parser.add_argument("--world-money-flow-image-png-path", default="", help="Optional PNG export path for the rendered world-money-flow image.")
     parser.add_argument("--delivery-webhook-url", default="", help="Optional webhook URL for summary + artifact delivery.")
     parser.add_argument("--delivery-timeout-seconds", type=float, default=10.0, help="Webhook timeout in seconds.")
     parser.add_argument(
@@ -257,38 +279,88 @@ def main(argv: Sequence[str] | None = None) -> int:
             }
         )
 
-    if include_daily_analysis and args.daily_free_markdown_path:
+    report_cache: dict[str, dict[str, object]] = {}
+
+    def _daily_report(access_tier: str) -> dict[str, object]:
+        cached = report_cache.get(access_tier)
+        if cached is not None:
+            return cached
         report = runtime.daily_analysis_service.get_daily_report(
             analysis_date=analysis_date,
-            access_tier="free",
+            access_tier=access_tier,
         )
         if report is None:
-            raise RuntimeError("Free daily analysis report not found for markdown export")
+            raise RuntimeError(f"{access_tier.title()} daily analysis report not found for export")
+        report_cache[access_tier] = report
+        return report
+
+    if include_daily_analysis and args.daily_free_markdown_path:
         artifact_records.append(
             {
                 "artifact_type": "daily_free_markdown",
                 "content_type": "text/markdown",
                 "path": args.daily_free_markdown_path,
                 "filename_hint": Path(args.daily_free_markdown_path).name,
-                "payload": render_daily_report_markdown(report),
+                "payload": render_daily_report_markdown(_daily_report("free")),
             }
         )
     if include_daily_analysis and args.daily_premium_markdown_path:
-        report = runtime.daily_analysis_service.get_daily_report(
-            analysis_date=analysis_date,
-            access_tier="premium",
-        )
-        if report is None:
-            raise RuntimeError("Premium daily analysis report not found for markdown export")
         artifact_records.append(
             {
                 "artifact_type": "daily_premium_markdown",
                 "content_type": "text/markdown",
                 "path": args.daily_premium_markdown_path,
                 "filename_hint": Path(args.daily_premium_markdown_path).name,
-                "payload": render_daily_report_markdown(report),
+                "payload": render_daily_report_markdown(_daily_report("premium")),
             }
         )
+
+    result_first_export_specs = (
+        ("free", "group_report", "markdown", args.group_report_free_markdown_path),
+        ("premium", "group_report", "markdown", args.group_report_premium_markdown_path),
+        ("free", "desk_report", "markdown", args.desk_report_free_markdown_path),
+        ("premium", "desk_report", "markdown", args.desk_report_premium_markdown_path),
+        ("free", "group_report", "json", args.group_report_free_json_path),
+        ("premium", "group_report", "json", args.group_report_premium_json_path),
+        ("free", "desk_report", "json", args.desk_report_free_json_path),
+        ("premium", "desk_report", "json", args.desk_report_premium_json_path),
+    )
+    if include_daily_analysis:
+        for access_tier, report_key, content_kind, target_path in result_first_export_specs:
+            if not str(target_path).strip():
+                continue
+            report = _daily_report(access_tier)
+            payload = dict(report.get(report_key, {}) or {})
+            if not payload:
+                fallback_renderer = render_group_report_markdown if report_key == "group_report" else render_desk_report_markdown
+                payload = {
+                    "report_type": report_key,
+                    "analysis_date": str(report.get("analysis_date", "")).strip(),
+                    "access_tier": str(report.get("access_tier", "")).strip(),
+                    "markdown": fallback_renderer(report),
+                    "status": "fallback",
+                }
+            if content_kind == "markdown":
+                renderer = render_group_report_markdown if report_key == "group_report" else render_desk_report_markdown
+                artifact_records.append(
+                    {
+                        "artifact_type": f"{report_key}_{access_tier}_markdown",
+                        "content_type": "text/markdown",
+                        "path": target_path,
+                        "filename_hint": Path(target_path).name,
+                        "payload": renderer(report),
+                    }
+                )
+                continue
+            artifact_records.append(
+                {
+                    "artifact_type": f"{report_key}_{access_tier}_json",
+                    "content_type": "application/json",
+                    "path": target_path,
+                    "filename_hint": Path(target_path).name,
+                    "payload": payload,
+                }
+            )
 
     want_prompt_artifacts = include_daily_analysis and bool(args.daily_free_prompt_path or args.daily_premium_prompt_path)
     want_mmu_artifact = include_daily_analysis and include_market_snapshot and bool(args.mmu_handoff_path)
@@ -311,6 +383,59 @@ def main(argv: Sequence[str] | None = None) -> int:
             record["path"] = target_path
             artifact_records.append(record)
 
+    if args.source_intel_json_path:
+        artifact_records.append(
+            {
+                "artifact_type": "source_intel_json",
+                "content_type": "application/json",
+                "path": args.source_intel_json_path,
+                "filename_hint": Path(args.source_intel_json_path).name,
+                "payload": runtime.intel_payload_service.get_source_intel_payload(
+                    analysis_date=analysis_date,
+                    limit=max(40, int(args.recent_limit) * 3),
+                ),
+            }
+        )
+    if args.world_money_flow_json_path:
+        artifact_records.append(
+            {
+                "artifact_type": "yesterday_world_money_flow_json",
+                "content_type": "application/json",
+                "path": args.world_money_flow_json_path,
+                "filename_hint": Path(args.world_money_flow_json_path).name,
+                "payload": runtime.intel_payload_service.get_yesterday_world_money_flow_payload(
+                    analysis_date=analysis_date,
+                    limit=max(40, int(args.recent_limit) * 3),
+                ),
+            }
+        )
+    if args.world_money_flow_image_json_path:
+        artifact_records.append(
+            {
+                "artifact_type": "yesterday_world_money_flow_image_json",
+                "content_type": "application/json",
+                "path": args.world_money_flow_image_json_path,
+                "filename_hint": Path(args.world_money_flow_image_json_path).name,
+                "payload": runtime.intel_payload_service.get_world_money_flow_image_payload(
+                    analysis_date=analysis_date,
+                    limit=max(40, int(args.recent_limit) * 3),
+                ),
+            }
+        )
+    if args.world_money_flow_image_png_path:
+        artifact_records.append(
+            {
+                "artifact_type": "yesterday_world_money_flow_image_png",
+                "content_type": "image/png",
+                "path": args.world_money_flow_image_png_path,
+                "filename_hint": Path(args.world_money_flow_image_png_path).name,
+                "payload": runtime.intel_payload_service.get_world_money_flow_image_payload(
+                    analysis_date=analysis_date,
+                    limit=max(40, int(args.recent_limit) * 3),
+                ),
+            }
+        )
+
     summary["artifacts"] = [_artifact_manifest_entry(artifact) for artifact in artifact_records]
 
     for artifact in artifact_records:
@@ -322,6 +447,15 @@ def main(argv: Sequence[str] | None = None) -> int:
             if not isinstance(payload, dict):
                 raise RuntimeError(f"JSON artifact payload must be dict: {artifact.get('artifact_type')}")
             _write_json(target_path, payload)
+        elif str(artifact.get("content_type", "")).strip() == "image/png":
+            payload = artifact.get("payload")
+            if not isinstance(payload, dict):
+                raise RuntimeError(f"PNG artifact payload must be dict: {artifact.get('artifact_type')}")
+            render_world_money_flow_png(payload, target_path)
+            artifact["payload"] = {
+                "rendered": True,
+                "source": "world_money_flow_image_payload",
+            }
         else:
             _write_text(target_path, str(artifact.get("payload", "")))
 

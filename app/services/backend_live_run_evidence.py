@@ -9,7 +9,12 @@ from pathlib import Path
 from typing import Any
 
 from app.services.pipeline_health import PipelineHealthService
-from app.services.pipeline_markdown import render_daily_report_markdown, render_pipeline_summary_markdown
+from app.services.pipeline_markdown import (
+    render_daily_report_markdown,
+    render_desk_report_markdown,
+    render_group_report_markdown,
+    render_pipeline_summary_markdown,
+)
 
 
 class BackendLiveRunEvidenceService:
@@ -189,12 +194,34 @@ class BackendLiveRunEvidenceService:
                 if report is None:
                     continue
                 daily_reports[access_tier] = report
-                artifacts.append(
-                    {
-                        "artifact_type": f"daily_{access_tier}_markdown",
-                        "content_type": "text/markdown",
-                        "path": str(target_dir / f"daily-{access_tier}.md"),
-                    }
+                artifacts.extend(
+                    [
+                        {
+                            "artifact_type": f"daily_{access_tier}_markdown",
+                            "content_type": "text/markdown",
+                            "path": str(target_dir / f"daily-{access_tier}.md"),
+                        },
+                        {
+                            "artifact_type": f"group_report_{access_tier}_markdown",
+                            "content_type": "text/markdown",
+                            "path": str(target_dir / f"group-report-{access_tier}.md"),
+                        },
+                        {
+                            "artifact_type": f"desk_report_{access_tier}_markdown",
+                            "content_type": "text/markdown",
+                            "path": str(target_dir / f"desk-report-{access_tier}.md"),
+                        },
+                        {
+                            "artifact_type": f"group_report_{access_tier}_json",
+                            "content_type": "application/json",
+                            "path": str(target_dir / f"group-report-{access_tier}.json"),
+                        },
+                        {
+                            "artifact_type": f"desk_report_{access_tier}_json",
+                            "content_type": "application/json",
+                            "path": str(target_dir / f"desk-report-{access_tier}.json"),
+                        },
+                    ]
                 )
 
         artifacts.extend(
@@ -227,6 +254,22 @@ class BackendLiveRunEvidenceService:
             self._write_text(
                 target_dir / f"daily-{access_tier}.md",
                 render_daily_report_markdown(report),
+            )
+            self._write_text(
+                target_dir / f"group-report-{access_tier}.md",
+                render_group_report_markdown(report),
+            )
+            self._write_text(
+                target_dir / f"desk-report-{access_tier}.md",
+                render_desk_report_markdown(report),
+            )
+            self._write_json(
+                target_dir / f"group-report-{access_tier}.json",
+                self._result_first_product_payload(report, report_key="group_report"),
+            )
+            self._write_json(
+                target_dir / f"desk-report-{access_tier}.json",
+                self._result_first_product_payload(report, report_key="desk_report"),
             )
 
         evidence_markdown = self._render_evidence_markdown(
@@ -333,6 +376,25 @@ class BackendLiveRunEvidenceService:
             access_tier=access_tier,
         )
         return report if isinstance(report, dict) else None
+
+    def _result_first_product_payload(
+        self,
+        report: dict[str, object],
+        *,
+        report_key: str,
+    ) -> dict[str, object]:
+        product = dict(report.get(report_key, {}) or {})
+        if product:
+            return product
+        report_type = report_key
+        renderer = render_group_report_markdown if report_key == "group_report" else render_desk_report_markdown
+        return {
+            "report_type": report_type,
+            "analysis_date": str(report.get("analysis_date", "")).strip(),
+            "access_tier": str(report.get("access_tier", "")).strip(),
+            "markdown": renderer(report),
+            "status": "fallback",
+        }
 
     def _render_evidence_markdown(
         self,

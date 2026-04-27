@@ -329,6 +329,22 @@ def render_daily_report_markdown(report: dict[str, Any]) -> str:
     return "\n".join(lines).strip() + "\n"
 
 
+def render_group_report_markdown(report: dict[str, Any]) -> str:
+    group_report = dict(report.get("group_report", {}) or {})
+    markdown = str(group_report.get("markdown", "")).strip()
+    if markdown:
+        return markdown + ("\n" if not markdown.endswith("\n") else "")
+    return "# 群发中长版\n\n- 当前没货。\n"
+
+
+def render_desk_report_markdown(report: dict[str, Any]) -> str:
+    desk_report = dict(report.get("desk_report", {}) or {})
+    markdown = str(desk_report.get("markdown", "")).strip()
+    if markdown:
+        return markdown + ("\n" if not markdown.endswith("\n") else "")
+    return "# 内参长版\n\n- 当前没货。\n"
+
+
 def _render_report_summary(summary: Any) -> str:
     if isinstance(summary, dict):
         headline = str(summary.get("headline", "")).strip()

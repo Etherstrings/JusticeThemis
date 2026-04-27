@@ -2,11 +2,33 @@
 
 [中文](README.zh.md)
 
+<div align="center">
+
+**Turn overnight global signal flow into a China-morning market read your operator can actually act on.**
+
+![FastAPI](https://img.shields.io/badge/FastAPI-Service-059669?style=flat-square&logo=fastapi&logoColor=white)
+![Overnight Intel](https://img.shields.io/badge/Overnight-Intel-1F2937?style=flat-square)
+![Self Hosted](https://img.shields.io/badge/Mode-Self_Hosted-0F766E?style=flat-square)
+![API](https://img.shields.io/badge/Surface-API-1D4ED8?style=flat-square)
+![Daily Analysis](https://img.shields.io/badge/Output-Daily_Analysis-7C3AED?style=flat-square)
+
+Overnight sources · U.S. close snapshot · fixed daily reports · MMU handoff
+
+[Local Startup](#local-startup) · [Smoke Check](#smoke-check) · [Support](#support)
+
+</div>
+
 This is the default bootstrap entrypoint for the standalone `JusticeThemis` repository. For the Chinese bootstrap companion, see [README.zh.md](README.zh.md).
 
 JusticeThemis is a standalone overnight international-news capture, U.S. market-close snapshot, fixed China-morning analysis cache, and downstream LLM/MMU export service.
 
 It is positioned as a result-first overnight market interpretation engine for the China-morning workflow, not just a downstream handoff tool.
+
+## <a id="support"></a>Support
+
+If JusticeThemis helps your research or China-morning workflow, you can support ongoing maintenance via GitHub Sponsors:
+
+- GitHub Sponsors: https://github.com/sponsors/Etherstrings
 
 <!-- readme-parity:what-it-does -->
 ## What It Does
@@ -110,6 +132,7 @@ Install dependencies:
 
 ```bash
 uv sync --dev
+pnpm install --dir frontend
 ```
 
 Canonical local verification command:
@@ -123,6 +146,17 @@ Run the API server:
 ```bash
 uv run python -m uvicorn app.main:app --host 127.0.0.1 --port 8000
 ```
+
+Run the standalone frontend preview in a second terminal:
+
+```bash
+pnpm --dir frontend dev
+```
+
+The frontend preview listens on `http://127.0.0.1:5173` by default and targets the backend through `VITE_API_BASE_URL`.
+The default value is `http://127.0.0.1:8000`; override it in `frontend/.env.local` if you want to point the UI at another backend.
+
+The built-in `/ui` operator panel remains a compatibility surface. New product-facing frontend work should go into `frontend/`.
 
 Run the fixed pipeline once:
 
@@ -184,7 +218,9 @@ These generated files are reproducible local artifacts. They are not part of the
 ### Verification baseline
 
 - Bootstrap dependencies with `uv sync --dev`
+- Bootstrap frontend dependencies with `pnpm install --dir frontend`
 - Run the canonical deterministic regression command with `uv run pytest -q`
+- Run `pnpm --dir frontend build` before claiming the standalone frontend preview is shippable
 - The repository CI baseline runs the same deterministic test command and does not require live provider credentials or premium/admin secrets
 
 The built-in `/ui` operator panel now stores an admin key in browser local storage only and sends it on `/refresh`. Leave the field blank if you want a read-only view.
@@ -233,11 +269,20 @@ curl -s -H "X-Admin-Access-Key: $OVERNIGHT_ADMIN_API_KEY" http://127.0.0.1:8000/
 curl -s http://127.0.0.1:8000/api/v1/news?limit=3
 ```
 
+For the standalone frontend preview path, also run:
+
+```bash
+pnpm --dir frontend dev
+pnpm --dir frontend build
+```
+
 Expected:
 
 - `healthz` returns `{"status":"ok","service":"JusticeThemis"}`
 - `readyz` returns sanitized runtime state, source-registry counts, and provider availability for search, market snapshot, and ticker enrichment
 - `/api/v1/news` returns JSON even when the dataset is empty
+- `http://127.0.0.1:5173` renders the standalone frontend preview and can load dashboard/news/analysis data against the local backend
+- the built-in `/ui` operator panel remains available as a compatibility surface rather than the primary frontend evolution target
 
 For a full CLI smoke, run:
 

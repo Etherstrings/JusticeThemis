@@ -43,6 +43,19 @@ class FakeMarketSnapshotService:
     def get_daily_snapshot(self, *, analysis_date: str | None = None):
         return self.snapshot
 
+    def get_external_signals(self, *, analysis_date: str | None = None):
+        if self.snapshot is None:
+            return None
+        return {
+            "analysis_date": self.snapshot.get("analysis_date"),
+            "market_date": self.snapshot.get("market_date"),
+            "external_market_signals": self.snapshot.get("external_market_signals"),
+            "prediction_markets": self.snapshot.get("prediction_markets"),
+            "kalshi_signals": self.snapshot.get("kalshi_signals"),
+            "fedwatch_signals": self.snapshot.get("fedwatch_signals"),
+            "cftc_signals": self.snapshot.get("cftc_signals"),
+        }
+
 
 class FakeAnalysisDateAwareHandoffService:
     def __init__(self) -> None:
@@ -188,6 +201,74 @@ def test_healthz_is_public_and_minimal() -> None:
         assert response.json() == {
             "status": "ok",
             "service": "JusticeThemis",
+        }
+
+
+def test_documented_frontend_dev_origin_can_call_backend_api() -> None:
+    with tempfile.TemporaryDirectory() as temp_dir:
+        database = Database(Path(temp_dir) / "test_api_frontend_cors.db")
+        client = TestClient(create_app(database=database))
+
+        response = client.options(
+            "/api/v1/news",
+            headers={
+                "Origin": "http://127.0.0.1:5173",
+                "Access-Control-Request-Method": "GET",
+            },
+        )
+
+        assert response.status_code == 200
+        assert response.headers["access-control-allow-origin"] == "http://127.0.0.1:5173"
+
+
+def test_alternate_local_frontend_dev_port_is_allowed_for_preview_fallback() -> None:
+    with tempfile.TemporaryDirectory() as temp_dir:
+        database = Database(Path(temp_dir) / "test_api_frontend_cors_fallback.db")
+        client = TestClient(create_app(database=database))
+
+        response = client.options(
+            "/api/v1/news",
+            headers={
+                "Origin": "http://127.0.0.1:5175",
+                "Access-Control-Request-Method": "GET",
+            },
+        )
+
+        assert response.status_code == 200
+        assert response.headers["access-control-allow-origin"] == "http://127.0.0.1:5175"
+
+
+def test_external_market_signals_endpoint_returns_signal_layer_only() -> None:
+    with tempfile.TemporaryDirectory() as temp_dir:
+        database = Database(Path(temp_dir) / "test_api_external_signals.db")
+        client = TestClient(
+            create_app(
+                database=database,
+                market_snapshot_service=FakeMarketSnapshotService(
+                    {
+                        "analysis_date": "2026-04-22",
+                        "market_date": "2026-04-21",
+                        "external_market_signals": {"ready_provider_count": 3, "provider_count": 4},
+                        "prediction_markets": {"status": "ready"},
+                        "kalshi_signals": {"status": "ready"},
+                        "fedwatch_signals": {"status": "source_restricted"},
+                        "cftc_signals": {"status": "ready"},
+                    }
+                ),
+            )
+        )
+
+        response = client.get("/api/v1/market/external-signals/daily", params={"analysis_date": "2026-04-22"})
+
+        assert response.status_code == 200
+        assert response.json() == {
+            "analysis_date": "2026-04-22",
+            "market_date": "2026-04-21",
+            "external_market_signals": {"ready_provider_count": 3, "provider_count": 4},
+            "prediction_markets": {"status": "ready"},
+            "kalshi_signals": {"status": "ready"},
+            "fedwatch_signals": {"status": "source_restricted"},
+            "cftc_signals": {"status": "ready"},
         }
 
 

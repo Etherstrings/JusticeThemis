@@ -831,6 +831,7 @@ class OvernightRepository:
         last_candidate_count: int = 0,
         last_selected_candidate_count: int = 0,
         last_persisted_count: int = 0,
+        last_published_at_conflict_count: int = 0,
         last_elapsed_seconds: float = 0.0,
     ) -> dict[str, object]:
         normalized_source_id = str(source_id).strip()
@@ -851,9 +852,10 @@ class OvernightRepository:
                     last_candidate_count,
                     last_selected_candidate_count,
                     last_persisted_count,
+                    last_published_at_conflict_count,
                     last_elapsed_seconds
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(source_id) DO UPDATE SET
                     last_status = excluded.last_status,
                     last_error = excluded.last_error,
@@ -864,6 +866,7 @@ class OvernightRepository:
                     last_candidate_count = excluded.last_candidate_count,
                     last_selected_candidate_count = excluded.last_selected_candidate_count,
                     last_persisted_count = excluded.last_persisted_count,
+                    last_published_at_conflict_count = excluded.last_published_at_conflict_count,
                     last_elapsed_seconds = excluded.last_elapsed_seconds,
                     updated_at = CURRENT_TIMESTAMP
                 """,
@@ -878,6 +881,7 @@ class OvernightRepository:
                     max(0, int(last_candidate_count)),
                     max(0, int(last_selected_candidate_count)),
                     max(0, int(last_persisted_count)),
+                    max(0, int(last_published_at_conflict_count)),
                     float(last_elapsed_seconds or 0.0),
                 ),
             )
@@ -962,6 +966,7 @@ class OvernightRepository:
         }
 
     def _source_refresh_state_payload(self, row: sqlite3.Row) -> dict[str, object]:
+        row_keys = set(row.keys())
         return {
             "source_id": str(row["source_id"]).strip(),
             "last_refresh_status": str(row["last_status"] or "").strip(),
@@ -973,6 +978,9 @@ class OvernightRepository:
             "last_candidate_count": int(row["last_candidate_count"] or 0),
             "last_selected_candidate_count": int(row["last_selected_candidate_count"] or 0),
             "last_persisted_count": int(row["last_persisted_count"] or 0),
+            "last_published_at_conflict_count": int(row["last_published_at_conflict_count"] or 0)
+            if "last_published_at_conflict_count" in row_keys
+            else 0,
             "last_elapsed_seconds": round(float(row["last_elapsed_seconds"] or 0.0), 3),
             "updated_at": str(row["updated_at"]).replace(" ", "T") if row["updated_at"] else None,
         }

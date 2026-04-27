@@ -3,7 +3,7 @@
 
 from __future__ import annotations
 
-from app.services.search_discovery import SearchDiscoveryResult, SearchDiscoveryService
+from app.services.search_discovery import AIHubMixSearchProvider, SearchDiscoveryResult, SearchDiscoveryService
 from app.sources.registry import build_default_source_registry
 from app.sources.types import SourceDefinition
 
@@ -25,6 +25,8 @@ def test_search_discovery_service_reads_provider_keys_from_environment(monkeypat
     monkeypatch.setenv("TAVILY_API_KEYS", "tavily-a")
     monkeypatch.setenv("SERPAPI_API_KEYS", "")
     monkeypatch.delenv("BRAVE_API_KEYS", raising=False)
+    monkeypatch.delenv("AIHUBMIX_API_KEYS", raising=False)
+    monkeypatch.delenv("AIHUBMIX_API_KEY", raising=False)
 
     service = SearchDiscoveryService.from_environment()
 
@@ -36,10 +38,106 @@ def test_search_discovery_service_prioritizes_serpapi_when_available(monkeypatch
     monkeypatch.setenv("TAVILY_API_KEYS", "tavily-a")
     monkeypatch.setenv("SERPAPI_API_KEYS", "serp-a")
     monkeypatch.delenv("BRAVE_API_KEYS", raising=False)
+    monkeypatch.delenv("AIHUBMIX_API_KEYS", raising=False)
+    monkeypatch.delenv("AIHUBMIX_API_KEY", raising=False)
 
     service = SearchDiscoveryService.from_environment()
 
     assert [provider.name for provider in service.providers] == ["SerpAPI", "Bocha", "Tavily"]
+
+
+def test_search_discovery_service_includes_aihubmix_after_existing_search_providers(monkeypatch) -> None:
+    monkeypatch.setenv("BOCHA_API_KEYS", "bocha-a")
+    monkeypatch.setenv("TAVILY_API_KEYS", "tavily-a")
+    monkeypatch.setenv("SERPAPI_API_KEYS", "serp-a")
+    monkeypatch.setenv("BRAVE_API_KEYS", "brave-a")
+    monkeypatch.setenv("AIHUBMIX_API_KEYS", "aimix-a")
+
+    service = SearchDiscoveryService.from_environment()
+
+    assert [provider.name for provider in service.providers] == ["SerpAPI", "Bocha", "Tavily", "Brave", "AIHubMix"]
+
+
+def test_aihubmix_search_provider_parses_json_content(monkeypatch) -> None:
+    class FakeResponse:
+        def raise_for_status(self) -> None:
+            return None
+
+        def json(self) -> dict[str, object]:
+            return {
+                "choices": [
+                        {
+                            "message": {
+                                "content": (
+                                    '{"results":['
+                                    '{"title":"Hong Kong stocks fall on tech pressure","url":"https://example.com/hk-tech","snippet":"KWEB and Hong Kong tech weakened overnight.","published_at":"2026-04-24"},'
+                                    '{"title":"China ADRs slip","url":"https://example.com/china-adrs","snippet":"ADRs fell as sentiment stayed weak.","published_at":""}'
+                                    "]}"
+                                )
+                            }
+                        }
+                    ]
+                }
+
+    captured: dict[str, object] = {}
+
+    def fake_post(url: str, *, headers: dict[str, str], json: dict[str, object], timeout: int):
+        captured["url"] = url
+        captured["headers"] = headers
+        captured["json"] = json
+        captured["timeout"] = timeout
+        return FakeResponse()
+
+    monkeypatch.setattr("app.services.search_discovery.requests.post", fake_post)
+    monkeypatch.setenv("AIHUBMIX_BASE_URL", "https://aihubmix.example/v1")
+    monkeypatch.setenv("AIHUBMIX_SEARCH_MODEL", "gpt-4o-mini:surfing")
+
+    provider = AIHubMixSearchProvider(api_keys=("aimix-key",))
+    results = provider.search(query="site:scmp.com Hong Kong stocks", max_results=3, days=7)
+
+    assert captured["url"] == "https://aihubmix.example/v1/chat/completions"
+    assert dict(captured["headers"])["Authorization"] == "Bearer aimix-key"
+    assert dict(captured["json"])["model"] == "gpt-4o-mini:surfing"
+    system_prompt = dict(dict(captured["json"])["messages"][0])["content"]
+    assert "Do not return mainland Chinese government" in system_prompt
+    assert "stats.gov.cn" in system_prompt
+    assert "pbc.gov.cn" in system_prompt
+    assert [item.url for item in results] == ["https://example.com/hk-tech", "https://example.com/china-adrs"]
+    assert results[0].published_at == "2026-04-24"
+    assert results[1].published_at is None
+
+
+def test_aihubmix_search_provider_falls_back_to_markdown_links(monkeypatch) -> None:
+    class FakeResponse:
+        def raise_for_status(self) -> None:
+            return None
+
+        def json(self) -> dict[str, object]:
+            return {
+                "choices": [
+                    {
+                        "message": {
+                            "content": (
+                                "- [Hong Kong stocks slide as tech stays weak](https://example.com/hk-slide)\n"
+                                "- [China ADRs drift lower overnight](https://example.com/adr-lower)\n"
+                            )
+                        }
+                    }
+                ]
+            }
+
+    monkeypatch.setattr("app.services.search_discovery.requests.post", lambda *args, **kwargs: FakeResponse())
+    monkeypatch.delenv("AIHUBMIX_BASE_URL", raising=False)
+    monkeypatch.delenv("AIHUBMIX_SEARCH_MODEL", raising=False)
+
+    provider = AIHubMixSearchProvider(api_keys=("aimix-key",))
+    results = provider.search(query="site:example.com Hong Kong stocks", max_results=2, days=7)
+
+    assert [item.title for item in results] == [
+        "Hong Kong stocks slide as tech stays weak",
+        "China ADRs drift lower overnight",
+    ]
+    assert [item.url for item in results] == ["https://example.com/hk-slide", "https://example.com/adr-lower"]
 
 
 def test_search_discovery_filters_off_domain_results_and_normalizes_candidates() -> None:
@@ -85,6 +183,220 @@ def test_search_discovery_filters_off_domain_results_and_normalizes_candidates()
     assert candidates[0].candidate_published_at == "2026-04-09"
     assert candidates[0].candidate_published_at_source == "search:published"
     assert candidates[0].needs_article_fetch is True
+
+
+def test_search_discovery_rejects_mainland_china_official_candidates_even_when_same_domain() -> None:
+    source = SourceDefinition(
+        source_id="manual_stats_cn",
+        display_name="Manual Mainland Statistics Source",
+        organization_type="official_data",
+        source_class="macro",
+        entry_type="section_page",
+        entry_urls=("https://www.stats.gov.cn/sj/",),
+        priority=90,
+        poll_interval_seconds=3600,
+        allowed_domains=("stats.gov.cn",),
+        search_discovery_enabled=True,
+        search_queries=("site:stats.gov.cn China macro data",),
+    )
+    provider = FakeSearchProvider(
+        "SerpAPI",
+        [
+            SearchDiscoveryResult(
+                title="Mainland statistics release",
+                snippet="This same-domain official result must still be rejected.",
+                url="https://www.stats.gov.cn/sj/zxfb/202604/t20260424_123456.html",
+                published_at="2026-04-24",
+            ),
+        ],
+    )
+
+    service = SearchDiscoveryService(providers=(provider,))
+    candidates = service.discover(source=source, max_results=5)
+
+    assert provider.queries == ["site:stats.gov.cn China macro data"]
+    assert candidates == []
+
+
+def test_search_discovery_accepts_china_proxy_market_source_article_results() -> None:
+    source = next(item for item in build_default_source_registry() if item.source_id == "scmp_markets")
+    provider = FakeSearchProvider(
+        "SerpAPI",
+        [
+            SearchDiscoveryResult(
+                title="Markets: Latest News and Updates",
+                snippet="SCMP section page should be skipped.",
+                url="https://www.scmp.com/business/markets",
+                published_at="2026-04-24",
+            ),
+            SearchDiscoveryResult(
+                title="Hong Kong stocks fall as tech shares and China ADRs weaken",
+                snippet="Hong Kong tech and China ADRs weakened overnight, matching KWEB and FXI pressure.",
+                url="https://www.scmp.com/business/markets/article/3312345/hong-kong-stocks-fall-tech-shares-china-adrs-weaken",
+                published_at="2026-04-24",
+            ),
+            SearchDiscoveryResult(
+                title="Off-domain mirror",
+                snippet="Mirror site should be skipped.",
+                url="https://example.com/business/markets/article/3312345/hong-kong-stocks-fall",
+                published_at="2026-04-24",
+            ),
+        ],
+    )
+
+    service = SearchDiscoveryService(providers=(provider,))
+    candidates = service.discover(source=source, max_results=5, days=3)
+
+    assert provider.queries[:1] == [source.search_queries[0]]
+    assert set(provider.queries).issubset(set(source.search_queries))
+    assert len(candidates) == 1
+    assert candidates[0].candidate_url.endswith("/hong-kong-stocks-fall-tech-shares-china-adrs-weaken")
+    assert candidates[0].candidate_excerpt_source == "search:serpapi"
+    assert candidates[0].needs_article_fetch is True
+
+
+def test_search_discovery_accepts_tradingeconomics_hk_article_results() -> None:
+    source = next(item for item in build_default_source_registry() if item.source_id == "tradingeconomics_hk")
+    provider = FakeSearchProvider(
+        "Bocha",
+        [
+            SearchDiscoveryResult(
+                title="Hong Kong Stock Market Index",
+                snippet="Entry stock-market page should be skipped.",
+                url="https://tradingeconomics.com/hong-kong/stock-market",
+                published_at="2026-04-24",
+            ),
+            SearchDiscoveryResult(
+                title="Hong Kong stocks decline on China technology weakness",
+                snippet="Hong Kong shares fell as China technology names weighed on the market.",
+                url="https://tradingeconomics.com/hong-kong/news/hong-kong-stocks-decline-on-china-technology-weakness",
+                published_at="2026-04-24",
+            ),
+        ],
+    )
+
+    service = SearchDiscoveryService(providers=(provider,))
+    candidates = service.discover(source=source, max_results=5, days=3)
+
+    assert provider.queries[:1] == [source.search_queries[0]]
+    assert set(provider.queries).issubset(set(source.search_queries))
+    assert len(candidates) == 1
+    assert candidates[0].candidate_url.endswith("/hong-kong-stocks-decline-on-china-technology-weakness")
+    assert candidates[0].candidate_excerpt_source == "search:bocha"
+    assert candidates[0].needs_article_fetch is True
+
+
+def test_search_discovery_rejects_tradingeconomics_hk_off_domain_noise_even_if_provider_returns_results() -> None:
+    source = next(item for item in build_default_source_registry() if item.source_id == "tradingeconomics_hk")
+    provider = FakeSearchProvider(
+        "Bocha",
+        [
+            SearchDiscoveryResult(
+                title="Hong Kong stocks up 0.13 pct by midday-Xinhua",
+                snippet="Off-domain mirror should be skipped.",
+                url="https://english.news.cn/20260421/53c92039d8584c99a46bd9b17165b53c/c.html",
+                published_at="2026-04-21",
+            ),
+            SearchDiscoveryResult(
+                title="Hong Kong Stock Market Closing Review",
+                snippet="LongPort mirror should be skipped.",
+                url="https://longportapp.cn/en/topics/40037119",
+                published_at="2026-04-20",
+            ),
+        ],
+    )
+
+    service = SearchDiscoveryService(providers=(provider,))
+    candidates = service.discover(source=source, max_results=5, days=3)
+
+    assert candidates == []
+
+
+def test_search_discovery_accepts_bls_release_articles_only() -> None:
+    source = next(item for item in build_default_source_registry() if item.source_id == "bls_news_releases")
+    provider = FakeSearchProvider(
+        "SerpAPI",
+        [
+            SearchDiscoveryResult(
+                title="BLS News Release Schedule",
+                snippet="Schedule page should be skipped.",
+                url="https://www.bls.gov/schedule/news_release/",
+                published_at="2026-04-24",
+            ),
+            SearchDiscoveryResult(
+                title="Consumer Price Index Summary",
+                snippet="The Consumer Price Index rose, feeding rates and dollar pricing.",
+                url="https://www.bls.gov/news.release/cpi.nr0.htm",
+                published_at="2026-04-24",
+            ),
+            SearchDiscoveryResult(
+                title="Consumer Price Index Table",
+                snippet="Table of CPI data should be skipped.",
+                url="https://www.bls.gov/news.release/cpi.t01.htm",
+                published_at="2026-04-24",
+            ),
+            SearchDiscoveryResult(
+                title="Consumer Price Index TOC",
+                snippet="Table of contents should be skipped.",
+                url="https://www.bls.gov/news.release/cpi.toc.htm",
+                published_at="2026-04-24",
+            ),
+        ],
+    )
+
+    service = SearchDiscoveryService(providers=(provider,))
+    candidates = service.discover(source=source, max_results=5, days=3)
+
+    assert provider.queries[:1] == [source.search_queries[0]]
+    assert set(provider.queries).issubset(set(source.search_queries))
+    assert [item.candidate_url for item in candidates] == ["https://www.bls.gov/news.release/cpi.nr0.htm"]
+    assert candidates[0].candidate_excerpt_source == "search:serpapi"
+    assert candidates[0].needs_article_fetch is True
+
+
+def test_search_discovery_accepts_iea_article_report_paths_only() -> None:
+    source = next(item for item in build_default_source_registry() if item.source_id == "iea_news")
+    provider = FakeSearchProvider(
+        "Tavily",
+        [
+            SearchDiscoveryResult(
+                title="IEA News",
+                snippet="Entry page should be skipped.",
+                url="https://www.iea.org/news",
+                published_at="2026-04-24",
+            ),
+            SearchDiscoveryResult(
+                title="Oil market pressures intensify as supply risks build",
+                snippet="IEA discusses oil supply risk and demand pressure.",
+                url="https://www.iea.org/news/oil-market-pressures-intensify-as-supply-risks-build",
+                published_at="2026-04-24",
+            ),
+            SearchDiscoveryResult(
+                title="Oil Market Report",
+                snippet="IEA report page can explain energy pricing.",
+                url="https://www.iea.org/reports/oil-market-report-april-2026",
+                published_at="2026-04-24",
+            ),
+            SearchDiscoveryResult(
+                title="Topics: Oil",
+                snippet="Topic page should be skipped.",
+                url="https://www.iea.org/topics/oil",
+                published_at="2026-04-24",
+            ),
+        ],
+    )
+
+    service = SearchDiscoveryService(providers=(provider,))
+    candidates = service.discover(source=source, max_results=5, days=3)
+
+    assert provider.queries[:1] == [source.search_queries[0]]
+    assert set(provider.queries).issubset(set(source.search_queries))
+    assert [item.candidate_url for item in candidates] == [
+        "https://www.iea.org/news/oil-market-pressures-intensify-as-supply-risks-build",
+        "https://www.iea.org/reports/oil-market-report-april-2026",
+    ]
+    assert all(item.candidate_excerpt_source == "search:tavily" for item in candidates)
+    assert all(item.needs_article_fetch is True for item in candidates)
 
 
 def test_search_discovery_cleans_navigation_noise_from_excerpt() -> None:

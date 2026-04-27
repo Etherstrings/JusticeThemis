@@ -3,85 +3,120 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>JusticeThemis Operator Console</title>
+    <title>JusticeThemis - OVERNIGHT SIGNAL DESK</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;700&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="/ui/styles.css" />
   </head>
   <body>
-    <div class="page-shell">
-      <div class="ambient ambient-left"></div>
-      <div class="ambient ambient-right"></div>
-
-      <header class="hero">
-        <div class="hero-copy">
-          <p class="eyebrow">JusticeThemis</p>
-          <h1>Overnight Signal Desk</h1>
-          <p class="hero-summary">
-            Capture official-first overseas news before your trading morning, keep the source visible,
-            and hand structured facts to a downstream model without hiding the provenance.
-          </p>
-        </div>
-        <div class="hero-panel">
-          <label class="operator-field" for="adminAccessKeyInput">
-            <span class="operator-label">Admin Access Key</span>
-            <input
-              id="adminAccessKeyInput"
-              class="operator-input"
-              type="password"
-              autocomplete="off"
-              placeholder="Only needed for refresh / readyz"
-            />
-          </label>
-          <p class="operator-help">Stored locally in your browser only. Leave blank for read-only use.</p>
-          <button id="refreshButton" class="action-button" type="button">Refresh Sources</button>
-          <p id="refreshStatus" class="status-line">Waiting for first refresh.</p>
-          <dl class="hero-metrics">
-            <div>
-              <dt>Captured</dt>
-              <dd id="metricItems">0</dd>
-            </div>
-            <div>
-              <dt>Official</dt>
-              <dd id="metricOfficial">0</dd>
-            </div>
-            <div>
-              <dt>Editorial</dt>
-              <dd id="metricEditorial">0</dd>
-            </div>
-          </dl>
-        </div>
-      </header>
-
-      <main class="dashboard-grid">
-        <section class="panel panel-news">
-          <div class="panel-header">
-            <div>
-              <p class="panel-kicker">Captured Stream</p>
-              <h2>Latest Items</h2>
-            </div>
-            <p class="panel-note">Every card keeps the original source and canonical URL.</p>
+    <div class="system-grid">
+      <!-- Sidebar / Controls -->
+      <aside class="control-panel">
+        <div class="brand">
+          <div class="brand-indicator"></div>
+          <div>
+            <div class="eyebrow">JUSTICETHEMIS // OS</div>
+            <h1>SIGNAL DESK</h1>
+            <p class="sr-only">Overnight Signal Desk</p>
           </div>
+        </div>
+
+        <div class="module metrics-module">
+          <div class="metric">
+            <span class="metric-label">CAPTURED</span>
+            <span class="metric-value active-glow" id="metricItems">00</span>
+          </div>
+          <div class="metric">
+            <span class="metric-label">OFFICIAL</span>
+            <span class="metric-value active-glow" id="metricOfficial">00</span>
+          </div>
+          <div class="metric">
+            <span class="metric-label">EDITORIAL</span>
+            <span class="metric-value" id="metricEditorial">00</span>
+          </div>
+        </div>
+
+        <div class="module auth-module">
+          <label class="input-label" for="adminAccessKeyInput">ACCESS KEY / ADMIN</label>
+          <div class="input-wrapper">
+             <input
+              id="adminAccessKeyInput"
+              type="password"
+              class="terminal-input"
+              autocomplete="off"
+              placeholder="ENTER SECURE KEY..."
+            />
+          </div>
+
+          <label class="input-label" for="ifindTokenInput" style="margin-top: 1rem;">IFIND TOKEN / REFRESH</label>
+          <div class="input-wrapper">
+             <input
+              id="ifindTokenInput"
+              type="password"
+              class="terminal-input"
+              autocomplete="off"
+              placeholder="ENTER IFIND TOKEN..."
+            />
+          </div>
+          <button id="saveIfindButton" class="cyber-button secondary" style="margin-top: 0.5rem; margin-bottom: 1rem;">
+            <span class="btn-text">SAVE IFIND CONFIG</span>
+            <span class="btn-scanline"></span>
+          </button>
+
+          <p class="help-text">System requires elevated access for force refresh. Key kept in local memory.</p>
+
+          <button id="refreshButton" class="cyber-button">
+            <span class="btn-text">INITIALIZE REFRESH</span>
+            <span class="btn-scanline"></span>
+            <span class="sr-only">Refresh Sources</span>
+          </button>
+
+          <div class="terminal-box">
+             <div class="terminal-header">SYSTEM LOG</div>
+             <div id="refreshStatus" class="terminal-content">Awaiting local connection...</div>
+          </div>
+        </div>
+      </aside>
+
+      <!-- Main Feed -->
+      <main class="data-feed">
+        <section class="feed-section">
+          <header class="section-header">
+            <h2>STREAM.CAPTURED</h2>
+            <div class="header-line"></div>
+          </header>
           <div id="itemsList" class="items-list"></div>
         </section>
 
-        <section class="panel panel-handoff">
-          <div class="panel-header">
-            <div>
-              <p class="panel-kicker">Model Input</p>
-              <h2>Handoff Package</h2>
+        <!-- Handoff Panel -->
+        <section class="handoff-section">
+          <header class="section-header">
+            <h2>MODEL.HANDOFF_PACKAGE</h2>
+            <div class="header-line"></div>
+          </header>
+
+          <div class="handoff-container">
+            <div class="prompt-panel">
+               <div class="panel-tab">SYS_PROMPT</div>
+               <div id="handoffPrompt" class="prompt-content">Fetching scaffold...</div>
             </div>
-            <p class="panel-note">Official tiers stay ahead of editorial tiers before truncation.</p>
-          </div>
-          <div class="handoff-summary">
-            <p id="handoffPrompt" class="prompt-box">Prompt scaffold will appear here.</p>
+
             <div id="handoffGroups" class="group-list"></div>
+
+            <details class="json-details">
+              <summary class="json-summary">Raw Output Trace [JSON]</summary>
+              <div class="json-content-wrapper">
+                 <pre id="handoffJson">Initializing...</pre>
+              </div>
+            </details>
           </div>
-          <details class="json-panel">
-            <summary>Raw handoff JSON</summary>
-            <pre id="handoffJson">Loading...</pre>
-          </details>
         </section>
       </main>
     </div>
+
+    <!-- Scanline overlay effect -->
+    <div class="scanlines"></div>
 
     <script type="module" src="/ui/app.js"></script>
   </body>

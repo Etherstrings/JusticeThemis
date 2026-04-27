@@ -2,11 +2,33 @@
 
 [English](README.md)
 
+<div align="center">
+
+**把隔夜全球信号流压成中国早晨能真正执行的市场判断。**
+
+![FastAPI](https://img.shields.io/badge/FastAPI-Service-059669?style=flat-square&logo=fastapi&logoColor=white)
+![Overnight Intel](https://img.shields.io/badge/Overnight-Intel-1F2937?style=flat-square)
+![Self Hosted](https://img.shields.io/badge/Mode-Self_Hosted-0F766E?style=flat-square)
+![API](https://img.shields.io/badge/Surface-API-1D4ED8?style=flat-square)
+![Daily Analysis](https://img.shields.io/badge/Output-Daily_Analysis-7C3AED?style=flat-square)
+
+隔夜源采集 · 美股收盘快照 · 固定日报 · MMU handoff
+
+[English README](README.md) · [赞助支持](#donate)
+
+</div>
+
 这是根级中文 bootstrap companion 文档。默认入口仍然是 [README.md](README.md)。
 
 JusticeThemis 是一个独立运行的隔夜国际新闻采集、美国收盘快照、固定中国早晨分析缓存，以及下游 LLM/MMU 导出服务。
 
 它的定位不是一个单纯的下游交接工具，而是面向中国早晨工作流的结果优先型隔夜市场解读引擎。
+
+## <a id="donate"></a>赞助支持
+
+如果 JusticeThemis 对你的研究或晨间工作流有帮助，欢迎通过 GitHub Sponsors 支持后续维护：
+
+- GitHub Sponsors: https://github.com/sponsors/Etherstrings
 
 <!-- readme-parity:what-it-does -->
 ## 功能概览
@@ -110,6 +132,7 @@ JusticeThemis 是一个独立运行的隔夜国际新闻采集、美国收盘快
 
 ```bash
 uv sync --dev
+pnpm install --dir frontend
 ```
 
 规范本地验证命令：
@@ -123,6 +146,17 @@ uv run pytest -q
 ```bash
 uv run python -m uvicorn app.main:app --host 127.0.0.1 --port 8000
 ```
+
+在第二个终端启动独立前端预览：
+
+```bash
+pnpm --dir frontend dev
+```
+
+前端预览默认监听 `http://127.0.0.1:5173`，并通过 `VITE_API_BASE_URL` 指向后端。
+默认值是 `http://127.0.0.1:8000`；如果要联调其他后端，可在 `frontend/.env.local` 中覆盖。
+
+内置 `/ui` operator 面板保留为兼容性 surface。新的产品前端实现应进入 `frontend/`。
 
 执行一次固定管线：
 
@@ -186,7 +220,9 @@ post-sync verification contract 如下：
 ### 验证基线
 
 - 用 `uv sync --dev` 初始化依赖
+- 用 `pnpm install --dir frontend` 初始化前端依赖
 - 用 `uv run pytest -q` 运行规范 deterministic regression 命令
+- 在声称独立前端可交付前，运行 `pnpm --dir frontend build`
 - 仓库 CI 基线运行相同的 deterministic 测试命令，不依赖 live provider 凭据或 premium/admin secrets
 
 内置 `/ui` operator 面板现在只会把 admin key 存在浏览器 local storage 中，并在 `/refresh` 请求时携带。若只需要只读视图，请保持该字段为空。
@@ -235,11 +271,20 @@ curl -s -H "X-Admin-Access-Key: $OVERNIGHT_ADMIN_API_KEY" http://127.0.0.1:8000/
 curl -s http://127.0.0.1:8000/api/v1/news?limit=3
 ```
 
+如果要走独立前端预览路径，还应运行：
+
+```bash
+pnpm --dir frontend dev
+pnpm --dir frontend build
+```
+
 预期结果：
 
 - `healthz` 返回 `{"status":"ok","service":"JusticeThemis"}`
 - `readyz` 返回已脱敏的运行状态、source-registry 计数，以及 search、market snapshot 和 ticker enrichment 的 provider availability
 - `/api/v1/news` 即使数据为空也返回 JSON
+- `http://127.0.0.1:5173` 可以渲染独立前端预览，并从本地后端加载 dashboard/news/analysis 数据
+- 内置 `/ui` operator 面板继续作为兼容性 surface 保留，而不是主要前端演进目标
 
 完整 CLI smoke 可运行：
 

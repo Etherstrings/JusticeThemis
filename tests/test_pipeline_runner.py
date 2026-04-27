@@ -96,6 +96,7 @@ class FakeMismatchedMarketSnapshotService(FakeMarketSnapshotService):
 class FakeDailyAnalysisService:
     def __init__(self) -> None:
         self.generate_calls: list[dict[str, object]] = []
+        self.report_calls: list[dict[str, object]] = []
 
     def generate_daily_reports(self, *, analysis_date: str | None = None, recent_limit: int = 200) -> dict[str, object]:
         self.generate_calls.append(
@@ -113,7 +114,29 @@ class FakeDailyAnalysisService:
         }
 
     def get_daily_report(self, *, analysis_date: str | None = None, access_tier: str = "free", version: int | None = None):
-        return {"analysis_date": analysis_date or "2026-04-10", "access_tier": access_tier}
+        self.report_calls.append(
+            {
+                "analysis_date": analysis_date,
+                "access_tier": access_tier,
+                "version": version,
+            }
+        )
+        return {
+            "analysis_date": analysis_date or "2026-04-10",
+            "access_tier": access_tier,
+            "group_report": {
+                "report_type": "group_report",
+                "analysis_date": analysis_date or "2026-04-10",
+                "access_tier": access_tier,
+                "markdown": f"# 群发中长版\n\n- {access_tier} group report\n",
+            },
+            "desk_report": {
+                "report_type": "desk_report",
+                "analysis_date": analysis_date or "2026-04-10",
+                "access_tier": access_tier,
+                "markdown": f"# 内参长版\n\n- {access_tier} desk report\n",
+            },
+        }
 
     def get_prompt_bundle(self, *, analysis_date: str | None = None, access_tier: str = "free", version: int | None = None):
         return {"analysis_date": analysis_date or "2026-04-10", "access_tier": access_tier, "messages": []}
@@ -439,6 +462,58 @@ def test_pipeline_cli_writes_artifacts_before_webhook_delivery(tmp_path, monkeyp
     assert (tmp_path / "free.json").exists()
     assert (tmp_path / "summary.json").exists()
     assert len(delivery_service.calls) == 1
+
+
+def test_pipeline_cli_writes_result_first_report_exports(tmp_path, monkeypatch) -> None:
+    artifact_service = TrackingArtifactService()
+    delivery_service = FileCheckingDeliveryService()
+    runtime = _runtime_services_for_cli(artifact_service=artifact_service, delivery_service=delivery_service)
+    monkeypatch.setattr("app.pipeline.load_runtime_environment", lambda *args, **kwargs: {})
+    monkeypatch.setattr("app.pipeline.build_runtime_services", lambda **kwargs: runtime)
+
+    summary_path = tmp_path / "summary.json"
+    free_group_md = tmp_path / "group-free.md"
+    premium_group_json = tmp_path / "group-premium.json"
+    free_desk_json = tmp_path / "desk-free.json"
+    premium_desk_md = tmp_path / "desk-premium.md"
+    exit_code = main(
+        [
+            "--analysis-date",
+            "2026-04-10",
+            "--group-report-free-markdown-path",
+            str(free_group_md),
+            "--group-report-premium-json-path",
+            str(premium_group_json),
+            "--desk-report-free-json-path",
+            str(free_desk_json),
+            "--desk-report-premium-markdown-path",
+            str(premium_desk_md),
+            "--output-path",
+            str(summary_path),
+        ]
+    )
+
+    assert exit_code == 0
+    assert free_group_md.exists()
+    assert premium_group_json.exists()
+    assert free_desk_json.exists()
+    assert premium_desk_md.exists()
+    assert "free group report" in free_group_md.read_text(encoding="utf-8")
+    assert "premium desk report" in premium_desk_md.read_text(encoding="utf-8")
+
+    premium_group_payload = json.loads(premium_group_json.read_text(encoding="utf-8"))
+    free_desk_payload = json.loads(free_desk_json.read_text(encoding="utf-8"))
+    assert premium_group_payload["report_type"] == "group_report"
+    assert premium_group_payload["access_tier"] == "premium"
+    assert free_desk_payload["report_type"] == "desk_report"
+    assert free_desk_payload["access_tier"] == "free"
+
+    summary = json.loads(summary_path.read_text(encoding="utf-8"))
+    artifact_types = {artifact["artifact_type"] for artifact in summary["artifacts"]}
+    assert "group_report_free_markdown" in artifact_types
+    assert "group_report_premium_json" in artifact_types
+    assert "desk_report_free_json" in artifact_types
+    assert "desk_report_premium_markdown" in artifact_types
 
 
 def test_pipeline_cli_keeps_local_outputs_when_webhook_fails(tmp_path, monkeypatch) -> None:

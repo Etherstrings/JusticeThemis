@@ -93,6 +93,149 @@ class RuleBasedDailyAnalysisProvider:
         "medium": 1,
         "low": 2,
     }
+    RESULT_FIRST_PRIORITY_SOURCES = {
+        "ap_financial_markets",
+        "ap_business",
+        "cnbc_markets",
+        "cnbc_technology",
+        "kitco_news",
+        "census_economic_indicators",
+        "bls_news_releases",
+        "bls_release_schedule",
+        "bea_news",
+        "fed_news",
+        "newyorkfed_news",
+        "eia_pressroom",
+        "iea_news",
+        "oilprice_world_news",
+        "ap_world",
+        "cnbc_world",
+        "scmp_markets",
+        "tradingeconomics_hk",
+    }
+    RESULT_FIRST_PENALTY_SOURCES = {
+        "whitehouse_news",
+        "ofac_recent_actions",
+        "ap_politics",
+    }
+    RESULT_FIRST_TITLE_HINTS = (
+        "stocks",
+        "stock",
+        "shares",
+        "wall street",
+        "nasdaq",
+        "s&p",
+        "dow",
+        "russell",
+        "treasury",
+        "yield",
+        "yields",
+        "bond",
+        "bonds",
+        "dollar",
+        "yuan",
+        "cnh",
+        "retail sales",
+        "monthly sales",
+        "food services",
+        "inventories",
+        "trade inventories",
+        "inflation",
+        "cpi",
+        "ppi",
+        "payroll",
+        "oil",
+        "crude",
+        "brent",
+        "wti",
+        "opec",
+        "hormuz",
+        "shipping",
+        "tanker",
+        "freight",
+        "gold",
+        "silver",
+        "copper",
+        "aluminum",
+        "aluminium",
+        "china",
+        "chinese",
+        "hong kong",
+        "kweb",
+        "fxi",
+        "adr",
+        "pboc",
+        "property",
+        "stimulus",
+    )
+    RESULT_FIRST_TOPIC_HINTS = {
+        "tech_equity",
+        "equity_market",
+        "technology_risk",
+        "semiconductor_supply_chain",
+        "oil_market",
+        "energy_supply",
+        "shipping_transport",
+        "gold_market",
+        "silver_market",
+        "precious_metals_safe_haven",
+        "industrial_metals",
+        "copper_market",
+        "aluminum_market",
+        "china_policy",
+        "china_property",
+        "china_internet",
+        "hong_kong_market",
+        "currency_fx",
+        "yield_curve",
+        "inflation",
+    }
+    RESULT_FIRST_BUCKET_GUARDRAIL_HINTS: dict[str, tuple[str, ...]] = {
+        "china_proxy": (
+            "hong kong",
+            "hang seng",
+            "hang seng tech",
+            "china stocks",
+            "china stock",
+            "china shares",
+            "mainland chinese",
+            "mainland china",
+            "kweb",
+            "fxi",
+            "adr",
+            "alibaba",
+            "jd.com",
+            "netease",
+            "beijing stimulus",
+            "housing market",
+        ),
+        "precious_metals": (
+            "gold",
+            "silver",
+            "bullion",
+            "precious metal",
+            "precious metals",
+        ),
+        "industrial_metals": (
+            "copper",
+            "aluminum",
+            "aluminium",
+            "critical minerals",
+            "mining",
+            "minerals",
+            "industrial metal",
+            "lme",
+            "smelter",
+            "warehouse",
+            "sulfuric acid",
+            "sx-ew",
+        ),
+    }
+    RESULT_FIRST_BUCKET_GUARDRAIL_MIN_SLOTS: dict[str, int] = {
+        "china_proxy": 1,
+        "precious_metals": 1,
+        "industrial_metals": 1,
+    }
     _AUDIT_STYLE_PATTERN = re.compile(
         r"\b(?:item_id=|authority=|capture=|cross_source=|conflict_count=|a_share=|watch=|facts=)\b",
         re.IGNORECASE,
@@ -133,6 +276,7 @@ class RuleBasedDailyAnalysisProvider:
         )
         supporting_items = self._build_supporting_items(scored_items)
         headline_news = self._build_headline_news(scored_items)
+        result_first_materials = self._build_result_first_materials(scored_items)
         market_move_brief = self._build_market_move_brief(
             market_snapshot=market_snapshot or None,
             market_context=market_context,
@@ -209,6 +353,7 @@ class RuleBasedDailyAnalysisProvider:
             "risk_watchpoints": risk_watchpoints,
             "supporting_items": supporting_items,
             "headline_news": headline_news,
+            "result_first_materials": result_first_materials,
             "market_move_brief": market_move_brief,
             "event_drivers": event_drivers,
             "editorial_chain_cn": editorial_chain_cn,
@@ -658,6 +803,249 @@ class RuleBasedDailyAnalysisProvider:
                 }
             )
         return items
+
+    def _build_result_first_materials(self, scored_items: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        selected: list[dict[str, Any]] = []
+        selected_item_ids: set[int] = set()
+        selected_signatures: set[str] = set()
+        source_counts: Counter[str] = Counter()
+        cluster_counts: Counter[str] = Counter()
+        coverage_counts: Counter[str] = Counter()
+        coverage_caps = {
+            "official": 12,
+            "editorial": 12,
+        }
+        max_items = 24
+
+        def coverage_bucket(item: dict[str, Any]) -> str:
+            coverage_tier = str(item.get("coverage_tier", "")).strip()
+            if coverage_tier in {"official_policy", "official_data"}:
+                return "official"
+            if coverage_tier == "editorial_media":
+                return "editorial"
+            return "other"
+
+        def append_item(scored_item: dict[str, Any], *, relax_coverage_cap: bool = False, relax_cluster_cap: bool = False) -> bool:
+            item = scored_item["item"]
+            item_id = int(item.get("item_id", 0) or 0)
+            source_id = str(item.get("source_id", "")).strip() or f"item_{item_id}"
+            cluster_id = self._event_cluster_id(item) or f"item_{item_id}"
+            signature = self._result_first_material_signature(item)
+            bucket = coverage_bucket(item)
+            if item_id in selected_item_ids:
+                return False
+            if signature and signature in selected_signatures:
+                return False
+            if source_counts[source_id] >= 2:
+                return False
+            if not relax_cluster_cap and cluster_counts[cluster_id] >= 3:
+                return False
+            if not relax_coverage_cap and bucket in coverage_caps and coverage_counts[bucket] >= coverage_caps[bucket]:
+                return False
+            selected.append(self._result_first_material_item(scored_item))
+            selected_item_ids.add(item_id)
+            if signature:
+                selected_signatures.add(signature)
+            source_counts[source_id] += 1
+            cluster_counts[cluster_id] += 1
+            if bucket in coverage_caps:
+                coverage_counts[bucket] += 1
+            return True
+
+        prioritized_scored_items = [
+            scored_item
+            for scored_item in scored_items
+            if self._result_first_material_priority(scored_item["item"]) >= 2
+        ]
+        prioritized_scored_items.sort(
+            key=lambda scored_item: (
+                -self._result_first_material_priority(scored_item["item"]),
+                -int(scored_item["signal_score"]),
+                int(scored_item["item"].get("item_id", 0) or 0),
+            )
+        )
+
+        for scored_item in prioritized_scored_items:
+            append_item(scored_item, relax_cluster_cap=True)
+            if len(selected) >= max_items:
+                return selected
+
+        for bucket_key in ("china_proxy", "precious_metals", "industrial_metals"):
+            min_slots = int(self.RESULT_FIRST_BUCKET_GUARDRAIL_MIN_SLOTS.get(bucket_key, 0) or 0)
+            bucket_selected = 0
+            for scored_item in self._result_first_bucket_guardrail_candidates(scored_items, bucket_key=bucket_key):
+                append_item(scored_item, relax_cluster_cap=True, relax_coverage_cap=True)
+                if int(scored_item["item"].get("item_id", 0) or 0) in selected_item_ids:
+                    bucket_selected += 1
+                if len(selected) >= max_items:
+                    return selected
+                if min_slots and bucket_selected >= min_slots:
+                    break
+
+        for scored_item in scored_items:
+            append_item(scored_item)
+            if len(selected) >= max_items:
+                return selected
+
+        for scored_item in scored_items:
+            append_item(scored_item, relax_coverage_cap=True)
+            if len(selected) >= max_items:
+                return selected
+
+        for scored_item in scored_items:
+            append_item(scored_item, relax_coverage_cap=True, relax_cluster_cap=True)
+            if len(selected) >= max_items:
+                break
+
+        return selected
+
+    def _result_first_bucket_guardrail_candidates(
+        self,
+        scored_items: list[dict[str, Any]],
+        *,
+        bucket_key: str,
+    ) -> list[dict[str, Any]]:
+        hints = self.RESULT_FIRST_BUCKET_GUARDRAIL_HINTS.get(bucket_key, ())
+        if not hints:
+            return []
+        candidates = [
+            scored_item
+            for scored_item in scored_items
+            if self._matches_result_first_bucket_guardrail(scored_item["item"], bucket_key=bucket_key, hints=hints)
+        ]
+        candidates.sort(
+            key=lambda scored_item: (
+                -self._result_first_bucket_guardrail_score(scored_item["item"], hints=hints),
+                -int(scored_item.get("signal_score", 0) or 0),
+                int(scored_item["item"].get("item_id", 0) or 0),
+            )
+        )
+        return candidates[:4]
+
+    def _matches_result_first_bucket_guardrail(
+        self,
+        item: dict[str, Any],
+        *,
+        bucket_key: str,
+        hints: tuple[str, ...],
+    ) -> bool:
+        text = self._result_first_bucket_guardrail_text(item)
+        if not text:
+            return False
+        if self._result_first_bucket_guardrail_score(item, hints=hints) <= 0:
+            return False
+        if bucket_key == "china_proxy":
+            return str(item.get("a_share_relevance", "")).strip() in {"high", "medium"}
+        return True
+
+    def _result_first_bucket_guardrail_text(self, item: dict[str, Any]) -> str:
+        return " ".join(
+            part
+            for part in (
+                str(item.get("title", "")).strip(),
+                str(item.get("summary", "")).strip(),
+                str(item.get("impact_summary", "")).strip(),
+                str(item.get("why_it_matters_cn", "")).strip(),
+                " ".join(
+                    str(tag).strip()
+                    for tag in list(item.get("topic_tags", []) or [])
+                    if str(tag).strip()
+                ),
+            )
+            if part
+        ).lower()
+
+    def _result_first_bucket_guardrail_score(self, item: dict[str, Any], *, hints: tuple[str, ...]) -> int:
+        text = self._result_first_bucket_guardrail_text(item)
+        return sum(1 for hint in hints if self._keyword_in_text(text, hint))
+
+    def _result_first_material_priority(self, item: dict[str, Any]) -> int:
+        source_id = str(item.get("source_id", "")).strip()
+        title_text = str(item.get("title", "")).strip().lower()
+        summary_text = str(item.get("summary", "")).strip().lower()
+        topic_tags = {
+            str(tag).strip().lower()
+            for tag in list(dict(item.get("event_cluster", {}) or {}).get("topic_tags", []) or [])
+            if str(tag).strip()
+        }
+        title_hits = sum(1 for hint in self.RESULT_FIRST_TITLE_HINTS if self._keyword_in_text(title_text, hint))
+        topic_hits = sum(1 for tag in topic_tags if tag in self.RESULT_FIRST_TOPIC_HINTS)
+        summary_industrial_hits = sum(
+            1
+            for hint in self.RESULT_FIRST_BUCKET_GUARDRAIL_HINTS.get("industrial_metals", ())
+            if self._keyword_in_text(summary_text, hint)
+        )
+        summary_precious_hits = sum(
+            1
+            for hint in self.RESULT_FIRST_BUCKET_GUARDRAIL_HINTS.get("precious_metals", ())
+            if self._keyword_in_text(summary_text, hint)
+        )
+        score = min(3, title_hits)
+        if topic_hits > 0:
+            score += 1
+        if summary_industrial_hits > 0:
+            score += 1
+        if summary_precious_hits > 0:
+            score += 1
+        if source_id in self.RESULT_FIRST_PRIORITY_SOURCES:
+            score += 1
+        if source_id == "kitco_news":
+            score += 1
+        if source_id in self.RESULT_FIRST_PENALTY_SOURCES and score == 0:
+            score -= 1
+        return score
+
+    def _result_first_material_signature(self, item: dict[str, Any]) -> str:
+        source_id = str(item.get("source_id", "")).strip()
+        title = str(item.get("title", "")).strip()
+        if not source_id and not title:
+            return ""
+        return f"{source_id.lower()}|{title.lower()}"
+
+    def _keyword_in_text(self, text: str, keyword: str) -> bool:
+        normalized_text = str(text or "").strip().lower()
+        normalized_keyword = str(keyword or "").strip().lower()
+        if not normalized_text or not normalized_keyword:
+            return False
+        if re.fullmatch(r"[a-z0-9]+", normalized_keyword):
+            pattern = rf"(?<![a-z0-9]){re.escape(normalized_keyword)}(?![a-z0-9])"
+            return bool(re.search(pattern, normalized_text))
+        return normalized_keyword in normalized_text
+
+    def _result_first_material_item(self, scored_item: dict[str, Any]) -> dict[str, Any]:
+        item = scored_item["item"]
+        user_brief_cn, brief_source, why_it_matters_cn = self._build_user_headline_brief(item)
+        return {
+            "item_id": int(item.get("item_id", 0) or 0),
+            "source_id": str(item.get("source_id", "")).strip(),
+            "source_name": str(item.get("source_name", "")).strip(),
+            "title": str(item.get("title", "")).strip(),
+            "coverage_tier": str(item.get("coverage_tier", "")).strip(),
+            "analysis_status": str(item.get("analysis_status", "")).strip(),
+            "analysis_confidence": str(item.get("analysis_confidence", "")).strip(),
+            "a_share_relevance": str(item.get("a_share_relevance", "")).strip(),
+            "signal_score": int(scored_item["signal_score"]),
+            "signal_score_breakdown": dict(scored_item["score_breakdown"]),
+            "published_at": item.get("published_at"),
+            "impact_summary": str(item.get("impact_summary", "")).strip(),
+            "timeliness": dict(item.get("timeliness", {}) or {}),
+            "source_capture_confidence": dict(item.get("source_capture_confidence", {}) or {}),
+            "cross_source_confirmation": dict(item.get("cross_source_confirmation", {}) or {}),
+            "fact_conflicts": list(item.get("fact_conflicts", []) or []),
+            "event_cluster": dict(item.get("event_cluster", {}) or {}),
+            "llm_ready_brief": str(item.get("llm_ready_brief", "")).strip(),
+            "user_brief_cn": user_brief_cn,
+            "brief_source": brief_source,
+            "why_it_matters_cn": why_it_matters_cn,
+            "beneficiary_directions": list(item.get("beneficiary_directions", []) or []),
+            "pressured_directions": list(item.get("pressured_directions", []) or []),
+            "price_up_signals": list(item.get("price_up_signals", []) or []),
+            "follow_up_checks": list(item.get("follow_up_checks", []) or []),
+            "evidence_points": list(item.get("evidence_points", []) or []),
+            "key_numbers": list(item.get("key_numbers", []) or []),
+            "fact_table": list(item.get("fact_table", []) or []),
+            "source_context": dict(item.get("source_context", {}) or {}),
+        }
 
     def _build_headline_news(self, scored_items: list[dict[str, Any]]) -> list[dict[str, Any]]:
         selected: list[dict[str, Any]] = []
@@ -1162,6 +1550,15 @@ class RuleBasedDailyAnalysisProvider:
 
     def _build_market_context(self, market_snapshot: dict[str, Any]) -> dict[str, Any]:
         capture_summary = dict(market_snapshot.get("capture_summary", {}) or {})
+        prediction_markets = dict(market_snapshot.get("prediction_markets", {}) or {})
+        kalshi_signals = dict(market_snapshot.get("kalshi_signals", {}) or {})
+        fedwatch_signals = dict(market_snapshot.get("fedwatch_signals", {}) or {})
+        cftc_signals = dict(market_snapshot.get("cftc_signals", {}) or {})
+        prediction_signals = [
+            dict(item or {})
+            for item in list(prediction_markets.get("signals", []) or [])
+            if isinstance(item, dict)
+        ]
         capture_status = str(capture_summary.get("capture_status", "")).strip() or "complete"
         missing_symbols = [str(symbol).strip() for symbol in list(capture_summary.get("missing_symbols", []) or []) if str(symbol).strip()]
         core_missing_symbols = [
@@ -1180,6 +1577,19 @@ class RuleBasedDailyAnalysisProvider:
             "missing_symbols": missing_symbols,
             "core_missing_symbols": core_missing_symbols,
             "captured_instrument_count": int(capture_summary.get("captured_instrument_count", 0) or 0),
+            "prediction_market_status": str(prediction_markets.get("status", "")).strip() or "unavailable",
+            "prediction_signal_count": len(prediction_signals),
+            "prediction_signal_labels": [
+                str(item.get("label", "")).strip()
+                for item in prediction_signals[:3]
+                if str(item.get("label", "")).strip()
+            ],
+            "kalshi_status": str(kalshi_signals.get("status", "")).strip() or "unavailable",
+            "kalshi_signal_count": len(list(kalshi_signals.get("signals", []) or [])),
+            "fedwatch_status": str(fedwatch_signals.get("status", "")).strip() or "unavailable",
+            "fedwatch_meeting_count": len(list(fedwatch_signals.get("meetings", []) or [])),
+            "cftc_status": str(cftc_signals.get("status", "")).strip() or "unavailable",
+            "cftc_signal_count": len(list(cftc_signals.get("signals", []) or [])),
         }
 
     def _default_mainline_coverage(
@@ -1262,7 +1672,88 @@ class RuleBasedDailyAnalysisProvider:
         if isinstance(volatility, dict) and volatility:
             market_bits.append(f"{volatility.get('display_name', 'VIX')} {self._format_pct(volatility.get('change_pct'))}")
         market_prefix = "；".join(market_bits) if market_bits else "美股收盘快照暂无主要指数摘要"
+        external_signal_clause = self._build_external_signal_clause(market_snapshot)
+        if external_signal_clause:
+            return f"{analysis_date} 对应的美股收盘表现为 {market_prefix}；{external_signal_clause}；{direction_clause}"
         return f"{analysis_date} 对应的美股收盘表现为 {market_prefix}；{direction_clause}"
+
+    def _build_external_signal_clause(self, market_snapshot: dict[str, Any]) -> str:
+        clauses: list[str] = []
+        prediction_clause = self._build_prediction_market_clause(market_snapshot)
+        if prediction_clause:
+            clauses.append(prediction_clause)
+        kalshi_clause = self._build_kalshi_clause(market_snapshot)
+        if kalshi_clause:
+            clauses.append(kalshi_clause)
+        fedwatch_clause = self._build_fedwatch_clause(market_snapshot)
+        if fedwatch_clause:
+            clauses.append(fedwatch_clause)
+        cftc_clause = self._build_cftc_clause(market_snapshot)
+        if cftc_clause:
+            clauses.append(cftc_clause)
+        return "；".join(clauses[:2])
+
+    def _build_prediction_market_clause(self, market_snapshot: dict[str, Any]) -> str:
+        prediction_markets = dict(market_snapshot.get("prediction_markets", {}) or {})
+        signals = [
+            dict(item or {})
+            for item in list(prediction_markets.get("signals", []) or [])
+            if isinstance(item, dict)
+        ]
+        if not signals:
+            return ""
+        ranked = sorted(
+            signals,
+            key=lambda item: abs(float(item.get("delta_pct_points", 0.0) or 0.0)),
+            reverse=True,
+        )
+        top = dict(ranked[0] or {})
+        label = str(top.get("label", "")).strip() or str(top.get("question", "")).strip()
+        probability = top.get("probability")
+        if not label or probability is None:
+            return ""
+        delta = top.get("delta_pct_points")
+        delta_text = f"，较上次 {float(delta):+.1f}pct" if delta is not None else ""
+        return f"Polymarket 显示 {label} 概率约 {float(probability):.1f}%{delta_text}"
+
+    def _build_kalshi_clause(self, market_snapshot: dict[str, Any]) -> str:
+        section = dict(market_snapshot.get("kalshi_signals", {}) or {})
+        signals = [dict(item or {}) for item in list(section.get("signals", []) or []) if isinstance(item, dict)]
+        if not signals:
+            return ""
+        top = dict(sorted(signals, key=lambda item: abs(float(item.get("delta_pct_points", 0.0) or 0.0)), reverse=True)[0] or {})
+        label = str(top.get("label", "")).strip() or str(top.get("question", "")).strip()
+        probability = top.get("probability")
+        if not label or probability is None:
+            return ""
+        return f"Kalshi 显示 {label} 概率约 {float(probability):.1f}%"
+
+    def _build_fedwatch_clause(self, market_snapshot: dict[str, Any]) -> str:
+        section = dict(market_snapshot.get("fedwatch_signals", {}) or {})
+        meetings = [dict(item or {}) for item in list(section.get("meetings", []) or []) if isinstance(item, dict)]
+        if not meetings:
+            return ""
+        first = dict(meetings[0] or {})
+        meeting_date = str(first.get("meeting_date", "")).strip()
+        cut_prob = first.get("cut_probability")
+        hold_prob = first.get("hold_probability")
+        if not meeting_date or cut_prob is None or hold_prob is None:
+            return ""
+        return f"CME FedWatch 显示 {meeting_date} 议息日降息概率 {float(cut_prob):.1f}%，按兵不动概率 {float(hold_prob):.1f}%"
+
+    def _build_cftc_clause(self, market_snapshot: dict[str, Any]) -> str:
+        section = dict(market_snapshot.get("cftc_signals", {}) or {})
+        signals = [dict(item or {}) for item in list(section.get("signals", []) or []) if isinstance(item, dict)]
+        if not signals:
+            return ""
+        top = dict(sorted(signals, key=lambda item: abs(int(item.get("managed_money_net", 0) or 0)), reverse=True)[0] or {})
+        label = str(top.get("label", "")).strip()
+        bias = str(top.get("bias", "")).strip()
+        mm_net = top.get("managed_money_net")
+        if not label or not isinstance(mm_net, int):
+            return ""
+        bias_cn = {"long": "净多", "short": "净空", "flat": "中性"}.get(bias, "中性")
+        return f"CFTC 显示 {label} 投机资金当前为 {bias_cn} {mm_net:+d}"
 
     def _format_pct(self, value: Any) -> str:
         try:

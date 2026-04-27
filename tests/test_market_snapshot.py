@@ -69,6 +69,50 @@ class _Always429Session:
         return _FakeHttpResponse(status_code=429)
 
 
+class StaticPredictionMarketService:
+    def __init__(self, payload: dict[str, object]) -> None:
+        self.payload = payload
+        self.calls: list[dict[str, object]] = []
+
+    def collect(
+        self,
+        *,
+        analysis_date: str,
+        market_date: str,
+        previous_snapshot: dict[str, object] | None = None,
+    ) -> dict[str, object]:
+        self.calls.append(
+            {
+                "analysis_date": analysis_date,
+                "market_date": market_date,
+                "previous_snapshot": previous_snapshot,
+            }
+        )
+        return self.payload
+
+
+class StaticSignalService:
+    def __init__(self, payload: dict[str, object]) -> None:
+        self.payload = payload
+        self.calls: list[dict[str, object]] = []
+
+    def collect(
+        self,
+        *,
+        analysis_date: str,
+        market_date: str,
+        previous_snapshot: dict[str, object] | None = None,
+    ) -> dict[str, object]:
+        self.calls.append(
+            {
+                "analysis_date": analysis_date,
+                "market_date": market_date,
+                "previous_snapshot": previous_snapshot,
+            }
+        )
+        return self.payload
+
+
 def _admin_headers(monkeypatch) -> dict[str, str]:
     monkeypatch.setenv("OVERNIGHT_ADMIN_API_KEY", "secret-admin")
     monkeypatch.delenv("OVERNIGHT_ALLOW_UNSAFE_ADMIN", raising=False)
@@ -900,3 +944,88 @@ def test_market_snapshot_service_falls_back_to_second_provider_when_primary_fail
         assert snapshot["source_url"] == "https://backup.example/"
         assert snapshot["indexes"][0]["provider_name"] == "Backup Provider"
         assert snapshot["indexes"][0]["provider_url"] == "https://backup.example/"
+
+
+def test_market_snapshot_service_embeds_prediction_market_payload() -> None:
+    with tempfile.TemporaryDirectory() as temp_dir:
+        database = Database(Path(temp_dir) / "test_market_snapshot_polymarket.db")
+        repo = OvernightRepository(database)
+        market_close = int(datetime(2026, 4, 8, 20, 0, tzinfo=timezone.utc).timestamp())
+        prediction_service = StaticPredictionMarketService(
+            {
+                "provider_name": "Polymarket",
+                "status": "ready",
+                "signal_count": 1,
+                "signals": [
+                    {
+                        "signal_key": "fed_path",
+                        "label": "美联储路径",
+                        "probability": 63.0,
+                        "delta_pct_points": 4.0,
+                    }
+                ],
+            }
+        )
+        service = UsMarketSnapshotService(
+            repo=repo,
+            http_client=RoutingMarketClient(
+                {
+                    "%5EGSPC": _chart_payload(
+                        symbol="^GSPC",
+                        name="S&P 500",
+                        first_close=5000.0,
+                        last_close=5100.0,
+                        market_time=market_close,
+                        instrument_type="INDEX",
+                    )
+                }
+            ),
+            instruments=(
+                MarketInstrumentDefinition(symbol="^GSPC", display_name="标普500", bucket="index", priority=100),
+            ),
+            prediction_market_service=prediction_service,
+        )
+
+        snapshot = service.refresh_us_close_snapshot()
+
+    assert snapshot["prediction_markets"]["provider_name"] == "Polymarket"
+    assert snapshot["prediction_markets"]["signal_count"] == 1
+    assert snapshot["prediction_markets"]["signals"][0]["signal_key"] == "fed_path"
+    assert prediction_service.calls[0]["analysis_date"] == "2026-04-09"
+
+
+def test_market_snapshot_service_embeds_external_signal_layers() -> None:
+    with tempfile.TemporaryDirectory() as temp_dir:
+        database = Database(Path(temp_dir) / "test_market_snapshot_external_signals.db")
+        repo = OvernightRepository(database)
+        market_close = int(datetime(2026, 4, 8, 20, 0, tzinfo=timezone.utc).timestamp())
+        service = UsMarketSnapshotService(
+            repo=repo,
+            http_client=RoutingMarketClient(
+                {
+                    "%5EGSPC": _chart_payload(
+                        symbol="^GSPC",
+                        name="S&P 500",
+                        first_close=5000.0,
+                        last_close=5100.0,
+                        market_time=market_close,
+                        instrument_type="INDEX",
+                    )
+                }
+            ),
+            instruments=(
+                MarketInstrumentDefinition(symbol="^GSPC", display_name="标普500", bucket="index", priority=100),
+            ),
+            prediction_market_service=StaticPredictionMarketService({"status": "ready", "headline": "Polymarket headline", "signals": [], "signal_count": 0}),
+            kalshi_signal_service=StaticSignalService({"status": "ready", "headline": "Kalshi headline", "signals": [], "signal_count": 0}),
+            fedwatch_signal_service=StaticSignalService({"status": "ready", "headline": "FedWatch headline", "meetings": [], "meeting_count": 0}),
+            cftc_signal_service=StaticSignalService({"status": "ready", "headline": "CFTC headline", "signals": [], "signal_count": 0}),
+        )
+
+        snapshot = service.refresh_us_close_snapshot()
+
+    assert snapshot["kalshi_signals"]["status"] == "ready"
+    assert snapshot["fedwatch_signals"]["status"] == "ready"
+    assert snapshot["cftc_signals"]["status"] == "ready"
+    assert snapshot["external_market_signals"]["ready_provider_count"] == 4
+    assert "Polymarket headline" in snapshot["external_market_signals"]["headline"]

@@ -41,3 +41,18 @@ def test_release_boundary_verdict_doc_records_first_run_gate_and_failures() -> N
     assert "Degraded-but-acceptable first-run states" in verdict_doc
     assert "Primary failure modes" in verdict_doc
     assert "BLS official pages currently return 403" in verdict_doc
+
+
+def test_root_readmes_document_standalone_frontend_preview_path() -> None:
+    english = _read_text(REPO_ROOT / "README.md")
+    chinese = _read_text(REPO_ROOT / "README.zh.md")
+
+    assert "pnpm install --dir frontend" in english
+    assert "pnpm --dir frontend dev" in english
+    assert "VITE_API_BASE_URL" in english
+    assert "built-in `/ui` operator panel remains a compatibility surface" in english
+
+    assert "pnpm install --dir frontend" in chinese
+    assert "pnpm --dir frontend dev" in chinese
+    assert "VITE_API_BASE_URL" in chinese
+    assert "内置 `/ui` operator 面板保留为兼容性 surface" in chinese
